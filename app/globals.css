@@ -1,26 +1,317 @@
 @import "tailwindcss";
 
+/* ============================================================
+   CUE POINT — design tokens
+   Teal #00C2A8 · Deep Navy #0B1F33 · Black · White (negative space)
+   ============================================================ */
+
+@theme {
+  --color-teal: #00c2a8;
+  --color-teal-bright: #2af0d6;
+  --color-teal-deep: #00a48f;
+  --color-navy: #0b1f33;
+  --color-navy-700: #0e2b46;
+  --color-navy-800: #0a2036;
+  --color-navy-900: #071626;
+  --color-navy-950: #05101c;
+  --color-ink: #05090f;
+  --color-paper: #ffffff;
+  --color-mist: rgba(233, 244, 248, 0.72);
+
+  --font-display: var(--font-display), "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-sans), "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --shadow-glow: 0 0 0 1px rgba(0, 194, 168, 0.25), 0 20px 60px -20px rgba(0, 194, 168, 0.45);
+
+  /* Site content width. `max-w-6xl` is the shared page container across
+     every section, `max-w-5xl` the narrower one (forms, pricing stack).
+     Both widened from Tailwind's defaults (72rem / 64rem) so wide screens
+     don't leave big empty gutters. Tune here, not per-component. */
+  --container-6xl: 86rem;
+  --container-5xl: 72rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #05101c;
+  --foreground: #eef6f8;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: auto; /* Lenis handles smooth scroll */
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  font-feature-settings: "ss01", "cv01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Ambient page backdrop — layered radial lighting over deep navy */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(60% 45% at 12% 6%, rgba(0, 194, 168, 0.16), transparent 60%),
+    radial-gradient(55% 40% at 92% 24%, rgba(12, 74, 110, 0.28), transparent 55%),
+    radial-gradient(70% 60% at 50% 110%, rgba(0, 194, 168, 0.12), transparent 60%),
+    linear-gradient(180deg, #05101c 0%, #071626 45%, #05101c 100%);
+}
+
+/* Fine grain to kill banding on gradients */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: rgba(0, 194, 168, 0.32);
+  color: #ffffff;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #05101c;
+}
+::-webkit-scrollbar-thumb {
+  background: #0e2b46;
+  border-radius: 999px;
+  border: 2px solid #05101c;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00a48f;
+}
+
+/* ============================================================
+   Utilities
+   ============================================================ */
+
+@utility glass {
+  background: rgba(255, 255, 255, 0.045);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+@utility glass-strong {
+  background: rgba(8, 24, 40, 0.72);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@utility text-gradient {
+  background: linear-gradient(100deg, #ffffff 0%, #b8f4ec 40%, #00c2a8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility text-teal-gradient {
+  background: linear-gradient(120deg, #2af0d6, #00c2a8 60%, #00a48f);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility ring-teal {
+  box-shadow: 0 0 0 1px rgba(0, 194, 168, 0.4), 0 0 40px -8px rgba(0, 194, 168, 0.55);
+}
+
+@utility hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Outline / stroke display type */
+@utility text-stroke {
+  -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.16);
+  color: transparent;
+}
+
+/* ============================================================
+   Keyframes
+   ============================================================ */
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-22px) rotate(6deg);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 194, 168, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 22px rgba(0, 194, 168, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 194, 168, 0);
+  }
+}
+
+@keyframes sheen {
+  0% {
+    transform: translateX(-120%) skewX(-20deg);
+  }
+  60%,
+  100% {
+    transform: translateX(220%) skewX(-20deg);
+  }
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 9s ease-in-out infinite;
+}
+.animate-spin-slow {
+  animation: spin-slow 26s linear infinite;
+}
+
+/* Magnetic / interactive button base */
+.btn-primary {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(120deg, #00c2a8, #00a48f);
+  color: #04121c;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: transform 0.35s var(--ease-out-expo), box-shadow 0.35s var(--ease-out-expo);
+  box-shadow: 0 10px 40px -12px rgba(0, 194, 168, 0.7);
+}
+.btn-primary:hover {
+  box-shadow: 0 18px 60px -14px rgba(0, 194, 168, 0.9);
+}
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: translateX(-120%) skewX(-20deg);
+  z-index: -1;
+}
+.btn-primary:hover::after {
+  animation: sheen 0.9s var(--ease-out-expo);
+}
+
+.btn-ghost {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+  color: #eef6f8;
+  font-weight: 500;
+  transition: border-color 0.3s, background 0.3s, transform 0.3s var(--ease-out-expo);
+}
+.btn-ghost:hover {
+  border-color: rgba(0, 194, 168, 0.6);
+  background: rgba(0, 194, 168, 0.08);
+}
+
+/* Nav link animated indicator */
+.nav-link {
+  position: relative;
+  padding-block: 4px;
+}
+.nav-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(90deg, #2af0d6, #00c2a8);
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 0.4s var(--ease-out-expo);
+}
+.nav-link:hover::after,
+.nav-link[data-active="true"]::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+/* Form inputs (booking widget) */
+.input {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.875rem;
+  color: #eef6f8;
+  transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+}
+.input::placeholder {
+  color: rgba(233, 244, 248, 0.35);
+}
+.input:focus {
+  outline: none;
+  border-color: rgba(0, 194, 168, 0.7);
+  background: rgba(0, 194, 168, 0.06);
+  box-shadow: 0 0 0 3px rgba(0, 194, 168, 0.15);
+}
+
+/* Felt-table texture tile for gallery */
+.felt {
+  background:
+    radial-gradient(120% 120% at 30% 20%, rgba(255, 255, 255, 0.08), transparent 55%),
+    radial-gradient(140% 140% at 80% 100%, rgba(0, 0, 0, 0.55), transparent 60%),
+    linear-gradient(160deg, #0c6b5f, #063f39 70%);
+}
+
+/* ============================================================
+   Reduced motion
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .animate-float-slow,
+  .animate-spin-slow {
+    animation: none !important;
+  }
 }
