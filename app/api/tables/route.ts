@@ -16,6 +16,7 @@ export async function GET() {
         area: t.area,
         note: t.note,
         seats: t.seats,
+        bookable: t.bookable,
       })),
     });
   } catch (err) {

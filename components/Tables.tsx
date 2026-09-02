@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { TABLE_HOURLY_RATE } from "@/lib/config";
 import { formatLKR } from "@/lib/utils";
+import { BookingOpenNote } from "./BookingOpenNote";
 import { Reveal } from "./Reveal";
 
 const STEPS = ["Table", "Time", "Details", "Confirm"] as const;
@@ -15,6 +16,7 @@ export type FloorTableOption = {
   area: string;
   note: string;
   seats: number;
+  bookable: boolean;
 };
 
 const ASSURANCES = [
@@ -24,9 +26,12 @@ const ASSURANCES = [
   { icon: "lock", t: "No account needed", d: "Book quick. Play easy." },
 ] as const;
 
+const firstBookable = (list: FloorTableOption[]) =>
+  (list.find((t) => t.bookable) ?? list[0])?.id ?? "";
+
 export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }) {
   const [tables, setTables] = useState<FloorTableOption[]>(initial);
-  const [tableId, setTableId] = useState<string>(initial[0]?.id ?? "");
+  const [tableId, setTableId] = useState<string>(firstBookable(initial));
   const [hours, setHours] = useState(2);
   const [players, setPlayers] = useState(2);
 
@@ -38,7 +43,7 @@ export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }
       .then((d) => {
         if (!alive || !Array.isArray(d.tables)) return;
         setTables(d.tables as FloorTableOption[]);
-        setTableId((id) => id || (d.tables[0]?.id ?? ""));
+        setTableId((id) => id || firstBookable(d.tables as FloorTableOption[]));
       })
       .catch(() => {});
     return () => {
@@ -47,14 +52,17 @@ export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }
   }, [initial.length]);
 
   const table = useMemo(
-    () => tables.find((t) => t.id === tableId) ?? tables[0],
+    () =>
+      tables.find((t) => t.id === tableId) ??
+      tables.find((t) => t.bookable) ??
+      tables[0],
     [tables, tableId],
   );
   const total = TABLE_HOURLY_RATE * hours;
 
   function pick(id: string) {
     const next = tables.find((t) => t.id === id);
-    if (!next) return;
+    if (!next || !next.bookable) return; // view-only tables are booked by phone
     setTableId(id);
     setPlayers((p) => Math.min(p, next.seats));
   }
@@ -86,8 +94,9 @@ export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }
           </h2>
           <p className="mt-4 text-mist">
             Live availability, instant confirmation, a reference to show at the
-            counter. No account needed.
+            counter.
           </p>
+          <BookingOpenNote tables={tables} />
         </Reveal>
 
         <Reveal className="mt-12">
@@ -135,16 +144,20 @@ export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }
                 )}
                 {tables.map((t, i) => {
                   const active = t.id === tableId;
+                  const phoneOnly = !t.bookable;
                   return (
                     <button
                       key={t.id}
                       type="button"
                       onClick={() => pick(t.id)}
+                      disabled={phoneOnly}
                       aria-pressed={active}
                       className={`flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition-colors sm:gap-4 sm:p-4 ${
-                        active
-                          ? "border-teal/60 bg-teal/[0.07] ring-1 ring-teal/40"
-                          : "border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12]"
+                        phoneOnly
+                          ? "cursor-default border-white/[0.05] bg-white/[0.01] opacity-60"
+                          : active
+                            ? "border-teal/60 bg-teal/[0.07] ring-1 ring-teal/40"
+                            : "border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12]"
                       }`}
                     >
                       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[linear-gradient(150deg,#0c6b5f,#063f39)] font-display text-base font-bold text-white/90 sm:h-11 sm:w-11 sm:text-lg">
@@ -163,19 +176,31 @@ export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }
                         </span>
                       </span>
                       <span className="shrink-0 text-right">
-                        <span className="block font-display text-sm font-bold text-white sm:text-[15px]">
-                          {formatLKR(TABLE_HOURLY_RATE)}
-                        </span>
-                        <span className="block text-[10px] text-mist sm:text-[11px]">
-                          / hour
-                        </span>
+                        {phoneOnly ? (
+                          <span className="block text-[10px] font-semibold uppercase tracking-wide text-mist sm:text-[11px]">
+                            By phone
+                          </span>
+                        ) : (
+                          <>
+                            <span className="block font-display text-sm font-bold text-white sm:text-[15px]">
+                              {formatLKR(TABLE_HOURLY_RATE)}
+                            </span>
+                            <span className="block text-[10px] text-mist sm:text-[11px]">
+                              / hour
+                            </span>
+                          </>
+                        )}
                       </span>
                       <span
                         className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${
-                          active ? "border-teal bg-teal text-navy-950" : "border-white/[0.14]"
+                          phoneOnly
+                            ? "border-white/[0.08]"
+                            : active
+                              ? "border-teal bg-teal text-navy-950"
+                              : "border-white/[0.14]"
                         }`}
                       >
-                        {active && (
+                        {active && !phoneOnly && (
                           <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
                             <path
                               d="M3 8.5l3.2 3.2L13 5"

@@ -2,10 +2,11 @@
 
 import { useRef } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { BookingWidget } from "./BookingWidget";
+import { BookingWidget, type TableOption } from "./BookingWidget";
+import { BookingOpenNote } from "./BookingOpenNote";
 import { Reveal } from "./Reveal";
 
-export function BookingSection() {
+export function BookingSection({ tables = [] }: { tables?: TableOption[] }) {
   const ref = useRef<HTMLElement>(null);
   const { scrollYProgress } = useScroll({
     target: ref,
@@ -36,12 +37,12 @@ export function BookingSection() {
           </h2>
           <p className="mx-auto mt-4 max-w-lg text-mist">
             Live availability, instant confirmation, a reference to show at the counter.
-            No account needed.
           </p>
+          <BookingOpenNote tables={tables} />
         </Reveal>
 
         <Reveal delay={0.1}>
-          <BookingWidget />
+          <BookingWidget tables={tables} />
         </Reveal>
       </div>
     </section>

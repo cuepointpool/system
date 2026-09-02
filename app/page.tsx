@@ -22,6 +22,7 @@ export default async function Home() {
     area: t.area,
     note: t.note,
     seats: t.seats,
+    bookable: t.bookable,
   }));
 
   return (
@@ -38,7 +39,7 @@ export default async function Home() {
       <Gallery />
       <HomeOffersCommunity />
       <Testimonials />
-      <BookingSection />
+      <BookingSection tables={tables} />
       <Location />
     </>
   );
