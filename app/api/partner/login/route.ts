@@ -5,10 +5,18 @@ import {
   partnerSessionToken,
   verifyPartnerLogin,
 } from "@/lib/partners";
+import { authGuard } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  const blocked = authGuard(req, {
+    scope: "partner-login",
+    limit: 10,
+    windowMs: 5 * 60_000,
+  });
+  if (blocked) return blocked;
+
   const body = await req.json().catch(() => null);
   const username = String(body?.username ?? "").trim();
   const password = String(body?.password ?? "");
@@ -36,6 +44,7 @@ export async function POST(req: NextRequest) {
   });
   res.cookies.set(PARTNER_COOKIE, partnerSessionToken(partner.id), {
     httpOnly: true,
+    secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_MAX_AGE,

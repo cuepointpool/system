@@ -2695,10 +2695,15 @@ async function fileToDataUrl(
 export function FinanceTab({
   headers,
   readOnly = false,
+  canManageRoster,
 }: {
   headers: Record<string, string>;
   readOnly?: boolean;
+  /** add / rename / remove partners + manage their logins. Admin only;
+   *  defaults to !readOnly (the admin console). Partners never get this. */
+  canManageRoster?: boolean;
 }) {
+  const manageRoster = canManageRoster ?? !readOnly;
   const [data, setData] = useState<FinanceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -2806,9 +2811,7 @@ export function FinanceTab({
                 return (
                   <tr key={p.id} className="text-white/90">
                     <td className="px-4 py-2.5">
-                      {readOnly ? (
-                        <span className="text-white/90">{p.name}</span>
-                      ) : (
+                      {manageRoster ? (
                         <PartnerName
                           name={p.name}
                           busy={busy}
@@ -2816,6 +2819,8 @@ export function FinanceTab({
                             send("PATCH", { kind: "partner", id: p.id, name })
                           }
                         />
+                      ) : (
+                        <span className="text-white/90">{p.name}</span>
                       )}
                       {p.positions.length > 0 && (
                         <span className="mt-1 flex flex-wrap gap-1">
@@ -2858,7 +2863,7 @@ export function FinanceTab({
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      {!readOnly && (
+                      {manageRoster && (
                         <button
                           disabled={busy}
                           onClick={() => {
@@ -2883,26 +2888,28 @@ export function FinanceTab({
         </div>
 
         {!readOnly && (
-          <>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <ContribForm
-                partners={data.partners}
-                busy={busy}
-                onSubmit={(body) =>
-                  send("POST", { kind: "contribution", ...body })
-                }
-              />
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <ContribForm
+              partners={data.partners}
+              busy={busy}
+              onSubmit={(body) =>
+                send("POST", { kind: "contribution", ...body })
+              }
+            />
+            {manageRoster && (
               <AddPartnerForm
                 busy={busy}
                 onSubmit={(name) => send("POST", { kind: "partner", name })}
               />
-            </div>
-            <PartnerAccessPanel
-              partners={data.partners}
-              headers={headers}
-              onSaved={load}
-            />
-          </>
+            )}
+          </div>
+        )}
+        {manageRoster && (
+          <PartnerAccessPanel
+            partners={data.partners}
+            headers={headers}
+            onSaved={load}
+          />
         )}
 
         {data.contributions.length > 0 && (

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminActor } from "@/lib/ecosystem/identity";
 import { financeEditor, financeViewer } from "@/lib/partners";
 import {
   addContribution,
@@ -55,6 +56,12 @@ export async function POST(req: NextRequest) {
   try {
     switch (body.kind) {
       case "partner": {
+        // adding/removing partners changes the ownership roster — admin only
+        if (!(await adminActor(req)))
+          return NextResponse.json(
+            { error: "Only an admin can add partners" },
+            { status: 403 },
+          );
         if (!String(body.name ?? "").trim())
           return NextResponse.json({ error: "Name is required" }, { status: 422 });
         const partner = await createPartner(String(body.name), actor);
@@ -139,9 +146,13 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const actor = await financeEditor(req);
+  // renaming / deactivating a partner is roster management — admin only
+  const actor = await adminActor(req);
   if (!actor)
-    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Only an admin can edit partners" },
+      { status: 403 },
+    );
   const body = await req.json().catch(() => ({}));
   if (body.kind !== "partner" || !body.id)
     return NextResponse.json({ error: "Unsupported" }, { status: 422 });
@@ -164,8 +175,15 @@ export async function DELETE(req: NextRequest) {
   try {
     if (kind === "expense") await deleteExpense(id, actor);
     else if (kind === "contribution") await deleteContribution(id, actor);
-    else if (kind === "partner") await deletePartner(id, actor);
-    else return NextResponse.json({ error: "Unknown kind" }, { status: 422 });
+    else if (kind === "partner") {
+      // deleting a partner (cascades their capital) is admin only
+      if (!(await adminActor(req)))
+        return NextResponse.json(
+          { error: "Only an admin can remove partners" },
+          { status: 403 },
+        );
+      await deletePartner(id, actor);
+    } else return NextResponse.json({ error: "Unknown kind" }, { status: 422 });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("finance DELETE error", err);

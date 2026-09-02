@@ -92,7 +92,13 @@ export function PartnerPortal() {
           <p className="text-sm text-mist">Loading…</p>
         )}
         {me === null && <PartnerLogin onDone={load} />}
-        {me && <FinanceTab headers={{}} readOnly={!me.canEditFinance} />}
+        {me && (
+          <FinanceTab
+            headers={{}}
+            readOnly={!me.canEditFinance}
+            canManageRoster={false}
+          />
+        )}
       </div>
     </div>
   );

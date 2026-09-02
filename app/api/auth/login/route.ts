@@ -6,10 +6,18 @@ import {
   verifyPassword,
 } from "@/lib/auth";
 import { getAuthByEmail } from "@/lib/ecosystem/store";
+import { authGuard } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  const blocked = authGuard(req, {
+    scope: "login",
+    limit: 10,
+    windowMs: 5 * 60_000,
+  });
+  if (blocked) return blocked;
+
   const body = await req.json().catch(() => null);
   const email = String(body?.email ?? "").trim().toLowerCase();
   const password = String(body?.password ?? "");
@@ -27,6 +35,7 @@ export async function POST(req: NextRequest) {
   });
   res.cookies.set(SESSION_COOKIE, createSessionToken(auth.id), {
     httpOnly: true,
+    secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_MAX_AGE,

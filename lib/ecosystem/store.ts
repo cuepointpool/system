@@ -1251,10 +1251,17 @@ export interface NewAccount {
 export async function createPlayerAccount(
   input: NewAccount,
 ): Promise<PlayerProfile> {
-  const first = (await countPlayers()) === 0;
   const id = "p_" + rid();
   const slug = await uniqueSlug(input.nickname);
+  let first = false;
   await transaction(async (client) => {
+    // serialize concurrent registrations so exactly one account can be the
+    // "first" (and become admin)
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('cuepoint:first-account'))");
+    const c = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM player_profiles`,
+    );
+    first = c.rows[0]?.n === "0";
     await client.query(
       `INSERT INTO player_profiles
         (id, slug, full_name, nickname, email, password_hash, role, membership_tier, membership_status)

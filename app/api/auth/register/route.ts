@@ -6,10 +6,18 @@ import {
   hashPassword,
 } from "@/lib/auth";
 import { createPlayerAccount, getAuthByEmail } from "@/lib/ecosystem/store";
+import { authGuard } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  const blocked = authGuard(req, {
+    scope: "register",
+    limit: 5,
+    windowMs: 60 * 60_000,
+  });
+  if (blocked) return blocked;
+
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
@@ -40,6 +48,7 @@ export async function POST(req: NextRequest) {
   });
   res.cookies.set(SESSION_COOKIE, createSessionToken(player.id), {
     httpOnly: true,
+    secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_MAX_AGE,

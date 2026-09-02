@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
   return new NextResponse(new Uint8Array(buf), {
     headers: {
       "Content-Type": m[1],
+      "X-Content-Type-Options": "nosniff",
       "Cache-Control": "private, max-age=3600",
       "Content-Disposition": `inline; filename="receipt-${id}.${ext}"`,
     },
