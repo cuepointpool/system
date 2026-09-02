@@ -209,7 +209,7 @@ async function main() {
         "Pitipana, Homagama, Sri Lanka", 3,
         JSON.stringify(["9ft King Model (main floor)", "9ft King Model (VIP booth)"]), 800,
         JSON.stringify(["Espresso & mocktail bar", "Private VIP booth", "Coaching", "Live rankings"]),
-        "+94 77 000 0000",
+        "+94 77 026 2675",
         JSON.stringify({ instagram: "https://instagram.com", facebook: "https://facebook.com" }),
         "https://www.google.com/maps/search/?api=1&query=Pitipana+Homagama",
         null, 0, true, true, true,

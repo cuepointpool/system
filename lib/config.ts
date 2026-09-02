@@ -12,8 +12,8 @@ export const SITE = {
     country: "Sri Lanka",
     maps: "https://www.google.com/maps/search/?api=1&query=Pitipana+Homagama",
   },
-  phone: "+94 77 000 0000",
-  phoneHref: "tel:+94770000000",
+  phone: "+94 77 026 2675",
+  phoneHref: "tel:+94770262675",
   email: "play@cuepoint.lk",
   socials: {
     instagram: "https://instagram.com",
