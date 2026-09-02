@@ -292,6 +292,23 @@ body::after {
   box-shadow: 0 0 0 3px rgba(0, 194, 168, 0.15);
 }
 
+/* <select> needs a solid (non-translucent) background or the native
+   control + its option list render white-on-white in dark mode. */
+select.input {
+  background-color: #0a2036;
+  color: #eef6f8;
+}
+select.input:focus {
+  background-color: #0e2b46;
+}
+select.input option,
+select.input optgroup,
+select option,
+select optgroup {
+  background-color: #0a2036;
+  color: #eef6f8;
+}
+
 /* Felt-table texture tile for gallery */
 .felt {
   background:
