@@ -15,14 +15,16 @@ export async function GET(req: NextRequest) {
   if (!dataUrl)
     return NextResponse.json({ error: "No receipt" }, { status: 404 });
 
-  const m = /^data:(image\/[a-z+]+);base64,(.*)$/i.exec(dataUrl);
+  const m = /^data:(image\/[a-z+]+|application\/pdf);base64,(.*)$/i.exec(dataUrl);
   if (!m) return NextResponse.json({ error: "Bad receipt" }, { status: 500 });
   const buf = Buffer.from(m[2], "base64");
+  const ext =
+    m[1] === "application/pdf" ? "pdf" : m[1].split("/")[1].replace("jpeg", "jpg");
   return new NextResponse(new Uint8Array(buf), {
     headers: {
       "Content-Type": m[1],
       "Cache-Control": "private, max-age=3600",
-      "Content-Disposition": `inline; filename="receipt-${id}"`,
+      "Content-Disposition": `inline; filename="receipt-${id}.${ext}"`,
     },
   });
 }

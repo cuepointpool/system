@@ -18,7 +18,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const MAX_RECEIPT_BYTES = 4_000_000; // ~4MB of base64
+const MAX_RECEIPT_BYTES = 8_000_000; // ~8MB of base64 (~6MB file) — PDFs run bigger
+const RECEIPT_DATA_URL = /^data:(image\/(png|jpe?g|webp)|application\/pdf);base64,/;
 
 export async function GET(req: NextRequest) {
   if (!(await financeViewer(req)))
@@ -83,14 +84,14 @@ export async function POST(req: NextRequest) {
             { status: 422 },
           );
         const receipt = body.receiptImage ? String(body.receiptImage) : null;
-        if (receipt && !/^data:image\/(png|jpe?g|webp);base64,/.test(receipt))
+        if (receipt && !RECEIPT_DATA_URL.test(receipt))
           return NextResponse.json(
-            { error: "Receipt must be a PNG, JPG or WebP image" },
+            { error: "Receipt must be a PNG, JPG, WebP image or a PDF" },
             { status: 422 },
           );
         if (receipt && receipt.length > MAX_RECEIPT_BYTES)
           return NextResponse.json(
-            { error: "Receipt image is too large (max ~3MB)" },
+            { error: "Receipt file is too large (max ~6MB)" },
             { status: 422 },
           );
         const expense = await addExpense(

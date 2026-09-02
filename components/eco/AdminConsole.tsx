@@ -5,6 +5,10 @@ import Link from "next/link";
 import { Tabs } from "./Primitives";
 import { cn, formatDateShort, formatLKR, label12h, timeAgo } from "@/lib/utils";
 import {
+  EXPENSE_CATEGORIES,
+  OTHER_CATEGORY,
+} from "@/lib/expense-categories";
+import {
   DURATION_OPTIONS,
   billableHours,
   priceFor,
@@ -2653,6 +2657,15 @@ type FinanceData = {
   summary: FinSummary;
 };
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = () => rej(new Error("read failed"));
+    r.readAsDataURL(file);
+  });
+}
+
 async function fileToDataUrl(
   file: File,
   maxDim = 1400,
@@ -3461,12 +3474,17 @@ function ExpenseForm({
   onSubmit: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
   const [category, setCategory] = useState("");
+  const [customCategory, setCustomCategory] = useState("");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [source, setSource] = useState<"revenue" | "capital">("revenue");
   const [spentAt, setSpentAt] = useState(localDate());
   const [receipt, setReceipt] = useState<string | null>(null);
+  const [receiptName, setReceiptName] = useState<string | null>(null);
   const [imgErr, setImgErr] = useState<string | null>(null);
+
+  const effectiveCategory =
+    category === OTHER_CATEGORY ? customCategory.trim() : category;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
@@ -3474,12 +3492,26 @@ function ExpenseForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="mb-1 block text-[11px] text-mist">Category</span>
-          <input
+          <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            placeholder="Rent, cloth, bar stock, electricity…"
             className="input"
-          />
+          >
+            <option value="">Pick a category…</option>
+            {EXPENSE_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          {category === OTHER_CATEGORY && (
+            <input
+              value={customCategory}
+              onChange={(e) => setCustomCategory(e.target.value)}
+              placeholder="Type the category"
+              className="input mt-2"
+            />
+          )}
         </label>
         <label className="block">
           <span className="mb-1 block text-[11px] text-mist">Amount (LKR)</span>
@@ -3529,33 +3561,51 @@ function ExpenseForm({
         </div>
         <label className="block sm:col-span-2">
           <span className="mb-1 block text-[11px] text-mist">
-            Receipt / bill photo (optional)
+            Receipt / bill — photo or PDF (optional)
           </span>
           <input
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg,image/webp,application/pdf"
             onChange={async (e) => {
               const f = e.target.files?.[0];
               setImgErr(null);
-              if (!f) {
-                setReceipt(null);
-                return;
-              }
+              setReceipt(null);
+              setReceiptName(null);
+              if (!f) return;
               try {
-                const d = await fileToDataUrl(f);
-                if (d.length > 3_800_000) {
-                  setImgErr("Image too large after compression — use a smaller photo.");
-                  setReceipt(null);
-                } else setReceipt(d);
+                const isPdf =
+                  f.type === "application/pdf" ||
+                  f.name.toLowerCase().endsWith(".pdf");
+                let d = isPdf
+                  ? await readFileAsDataUrl(f)
+                  : await fileToDataUrl(f);
+                if (isPdf && !d.startsWith("data:application/pdf")) {
+                  const i = d.indexOf(";base64,");
+                  if (i === -1) {
+                    setImgErr("Couldn't read that PDF.");
+                    return;
+                  }
+                  d = "data:application/pdf" + d.slice(i);
+                }
+                if (d.length > 7_800_000) {
+                  setImgErr(
+                    isPdf
+                      ? "PDF is too large — keep it under ~6MB."
+                      : "Image too large after compression — use a smaller photo.",
+                  );
+                  return;
+                }
+                setReceipt(d);
+                setReceiptName(f.name);
               } catch {
-                setImgErr("Couldn't read that image.");
+                setImgErr("Couldn't read that file.");
               }
             }}
             className="block w-full text-xs text-mist file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-1.5 file:text-xs file:text-white"
           />
           {receipt && (
             <span className="mt-1 block text-[11px] text-teal">
-              Attached ✓
+              Attached ✓ {receiptName ? `— ${receiptName}` : ""}
             </span>
           )}
           {imgErr && (
@@ -3566,10 +3616,10 @@ function ExpenseForm({
         </label>
       </div>
       <button
-        disabled={busy || !category.trim() || !(Number(amount) > 0)}
+        disabled={busy || !effectiveCategory || !(Number(amount) > 0)}
         onClick={async () => {
           const ok = await onSubmit({
-            category: category.trim(),
+            category: effectiveCategory,
             description: description.trim() || undefined,
             amount: Number(amount),
             source,
@@ -3578,9 +3628,11 @@ function ExpenseForm({
           });
           if (ok) {
             setCategory("");
+            setCustomCategory("");
             setDescription("");
             setAmount("");
             setReceipt(null);
+            setReceiptName(null);
           }
         }}
         className="btn-primary mt-3 px-4 py-2 text-xs disabled:opacity-40"
