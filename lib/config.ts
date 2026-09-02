@@ -4,12 +4,20 @@ export const SITE = {
   name: "Cue Point",
   tagline: "Where every shot counts",
   kicker: "Pool Parlour",
+  /** Canonical origin — override with NEXT_PUBLIC_SITE_URL once a custom
+   *  domain is live; today the site is served from CloudFront. */
+  url:
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    "https://d2tisxlomg8f7u.cloudfront.net",
   description:
     "Cue Point is a premium pool parlour in Pitipana, Homagama — tournament-grade tables, a neon-lit lounge, and an effortless online booking system.",
   address: {
     line1: "Pitipana",
     line2: "Homagama",
+    region: "Western Province",
+    postalCode: "10200",
     country: "Sri Lanka",
+    geo: { lat: 6.8449, lng: 80.0028 },
     maps: "https://www.google.com/maps/search/?api=1&query=Pitipana+Homagama",
   },
   phone: "+94 77 026 2675",

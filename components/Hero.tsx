@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   motion,
@@ -19,6 +19,36 @@ const HEADLINE = ["Where", "every", "shot", "counts"];
 export function Hero() {
   const ref = useRef<HTMLElement>(null);
   const [videoReady, setVideoReady] = useState(false);
+  // The hero clip is heavy (~11 MB). Skip it on small screens and on
+  // data-saver / slow connections — the still image already carries the
+  // section. Load it only after the page is interactive on desktop.
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const bigScreen = window.matchMedia("(min-width: 1024px)").matches;
+    const conn = (
+      navigator as Navigator & {
+        connection?: { saveData?: boolean; effectiveType?: string };
+      }
+    ).connection;
+    const slow =
+      conn?.saveData ||
+      (conn?.effectiveType != null && /2g|slow/.test(conn.effectiveType));
+    if (!bigScreen || slow) return;
+    const load = () => setVideoSrc("/media/hero.mp4");
+    const idle =
+      "requestIdleCallback" in window
+        ? (window.requestIdleCallback as (cb: () => void) => number)
+        : (cb: () => void) => window.setTimeout(cb, 1200);
+    const id = idle(load);
+    return () => {
+      if ("cancelIdleCallback" in window) {
+        (window.cancelIdleCallback as (h: number) => void)(id as number);
+      } else {
+        clearTimeout(id as number);
+      }
+    };
+  }, []);
 
   const { scrollYProgress } = useScroll({
     target: ref,
@@ -69,26 +99,29 @@ export function Hero() {
         />
       </motion.div>
 
-      {/* video layer — fades in only once it's actually playing */}
-      <motion.div
-        style={{ scale: videoScale, y: videoY }}
-        className="absolute inset-0 -z-20"
-      >
-        <video
-          onPlaying={() => setVideoReady(true)}
-          className={
-            "h-full w-full object-cover transition-opacity duration-700 " +
-            (videoReady ? "opacity-100" : "opacity-0")
-          }
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
+      {/* video layer — desktop only, loads after the page is interactive,
+          fades in once it's actually playing */}
+      {videoSrc && (
+        <motion.div
+          style={{ scale: videoScale, y: videoY }}
+          className="absolute inset-0 -z-20"
         >
-          <source src="/media/hero.mp4" type="video/mp4" />
-        </video>
-      </motion.div>
+          <video
+            onPlaying={() => setVideoReady(true)}
+            className={
+              "h-full w-full object-cover transition-opacity duration-700 " +
+              (videoReady ? "opacity-100" : "opacity-0")
+            }
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="none"
+          >
+            <source src={videoSrc} type="video/mp4" />
+          </video>
+        </motion.div>
+      )}
 
       {/* colour + vignette overlays */}
       <motion.div

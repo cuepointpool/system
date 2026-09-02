@@ -10,6 +10,7 @@ import { listTables } from "@/lib/tables";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/book" },
   title: "Book a table",
   description:
     "Reserve a pool or VIP table at Cue Point, Pitipana, Homagama. Live availability and instant confirmation.",

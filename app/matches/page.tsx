@@ -12,6 +12,7 @@ import type { MatchType } from "@/lib/ecosystem/types";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/matches" },
   title: "Match history",
   description:
     "Every recorded frame at Cue Point — casual, ranked and tournament — with scores, tables and ranking-point swings.",

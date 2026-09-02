@@ -6,6 +6,7 @@ import { getPromotions } from "@/lib/ecosystem/store";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/offers" },
   title: "Offers",
   description:
     "Current Cue Point offers and promotions — happy hour, student rates, group packages and tournament deals.",

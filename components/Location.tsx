@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { HOURS_DISPLAY, SITE } from "@/lib/config";
+import { MapEmbed } from "./MapEmbed";
 import { Reveal } from "./Reveal";
 
 const WA_NUMBER = SITE.phoneHref.replace(/\D/g, "");
@@ -21,9 +22,6 @@ const HIGHLIGHTS = [
   { label: "Easy access", icon: "route" },
   { label: "Walk-ins welcome", icon: "door" },
 ] as const;
-
-const MAP_SRC =
-  "https://www.openstreetmap.org/export/embed.html?bbox=79.965%2C6.815%2C80.045%2C6.875&layer=mapnik&marker=6.845%2C80.005";
 
 export function Location() {
   return (
@@ -144,13 +142,7 @@ export function Location() {
 
           <div className="relative">
             <div className="relative h-[380px] overflow-hidden rounded-[32px] border border-white/[0.06] shadow-[0_40px_120px_-50px_rgba(0,0,0,0.9),0_0_90px_-28px_rgba(0,194,168,0.4)] sm:h-[460px]">
-              <iframe
-                title="Map to Cue Point, Pitipana, Homagama"
-                className="absolute inset-0 h-full w-full"
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                src={MAP_SRC}
-              />
+              <MapEmbed />
 
               {/* glowing Cue Point pin (marker sits dead-centre of this bbox) */}
               <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">

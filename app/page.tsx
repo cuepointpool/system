@@ -10,10 +10,16 @@ import { Gallery } from "@/components/Gallery";
 import { Testimonials } from "@/components/Testimonials";
 import { BookingSection } from "@/components/BookingSection";
 import { Location } from "@/components/Location";
+import type { Metadata } from "next";
 import { HomeScene, HomeOffersCommunity } from "@/components/eco/HomeSections";
+import { HomeJsonLd } from "@/components/JsonLd";
 import { listTables } from "@/lib/tables";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 export default async function Home() {
   const tables = (await listTables()).map((t) => ({
@@ -27,6 +33,7 @@ export default async function Home() {
 
   return (
     <>
+      <HomeJsonLd />
       <Hero />
       <Marquee />
       <About />

@@ -6,6 +6,7 @@ import { getLeaderboard } from "@/lib/ecosystem/store";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/rankings" },
   title: "Rankings",
   description:
     "The official Cue Point leaderboard — ranking points, recent form and movement for every player, updated after each recorded match.",

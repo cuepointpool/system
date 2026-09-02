@@ -7,6 +7,7 @@ import type { LeaderboardRow } from "@/lib/ecosystem/types";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/players" },
   title: "Players",
   description:
     "The Cue Point player community — skill levels, rankings, recent form and win rates. Find someone to play.",

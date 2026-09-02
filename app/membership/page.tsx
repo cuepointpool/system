@@ -7,6 +7,7 @@ import { getMembershipPlans, getRewards } from "@/lib/ecosystem/store";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/membership" },
   title: "Membership",
   description:
     "Cue Point membership — Basic, Pro and Elite. Better pricing, priority booking, ranked play, tournament perks and faster loyalty earning.",

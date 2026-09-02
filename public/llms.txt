@@ -1,0 +1,28 @@
+# Cue Point
+
+> Cue Point is a premium pool parlour in Pitipana, Homagama, Sri Lanka —
+> tournament-grade 9ft King Model tables, a neon-lit lounge with an
+> espresso & mocktail bar, and online table booking for members.
+
+- Location: Pitipana, Homagama, Western Province, Sri Lanka
+- Phone: +94 77 026 2675
+- Hours: every day, 12:00 noon to 2:00 AM
+- Rate: LKR 800 per hour, per table (LKR 500 per extra 30 min)
+- Tables: 3 on the floor (2 main-floor, 1 VIP booth). Online booking is
+  currently open for one table; the others are reserved by phone.
+
+## Pages
+
+- [Home](/): overview, the room, live floor availability
+- [Book a table](/book): pick a day and time, get a reference for the counter
+- [Membership](/membership): tiers, benefits, pricing
+- [Offers](/offers): current promotions
+- [Rankings](/rankings): the Cue Point Elo leaderboard
+- [Players](/players): the player community and profiles
+- [Matches](/matches): recorded match results
+- [Tournaments](/tournaments): upcoming and past events
+
+## Notes
+
+- Online booking requires a free player account and is members-only.
+- Walk-ins are always welcome; staff assign tables at the counter.

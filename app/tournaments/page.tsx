@@ -11,6 +11,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/tournaments" },
   title: "Tournaments",
   description:
     "Cue Point tournaments — knockouts, leagues and the Pitipana Masters. Register with your Cue Point account.",

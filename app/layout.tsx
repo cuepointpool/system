@@ -6,6 +6,7 @@ import { ScrollProgress } from "@/components/ScrollProgress";
 import { Cursor } from "@/components/Cursor";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { Analytics } from "@/components/Analytics";
 import { SITE } from "@/lib/config";
 
 const display = Space_Grotesk({
@@ -21,25 +22,34 @@ const sans = Inter({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://cuepoint.lk"),
+  metadataBase: new URL(SITE.url),
   title: {
-    default: `${SITE.name} — Pool Parlour in Pitipana, Homagama`,
-    template: `%s · ${SITE.name}`,
+    default: `${SITE.name} — Book a Pool Table in Pitipana, Homagama`,
+    template: `%s · ${SITE.name} Pool Parlour`,
   },
   description: SITE.description,
   keywords: [
-    "pool parlour",
-    "billiards Homagama",
-    "VIP pool table Pitipana",
-    "book pool table Sri Lanka",
+    "pool parlour Homagama",
+    "book a pool table Pitipana",
+    "billiards Sri Lanka",
+    "VIP pool table booking",
+    "9ft King Model tables",
     "Cue Point",
   ],
   openGraph: {
-    title: `${SITE.name} — ${SITE.tagline}`,
+    title: `${SITE.name} — Book a Pool Table in Homagama`,
     description: SITE.description,
+    url: SITE.url,
+    siteName: `${SITE.name} Pool Parlour`,
     type: "website",
     locale: "en_LK",
     images: [{ url: "/media/cover.png", width: 2031, height: 774, alt: SITE.name }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE.name} — Book a Pool Table in Homagama`,
+    description: SITE.description,
+    images: ["/media/cover.png"],
   },
   icons: {
     icon: [{ url: "/media/logo-mark.png" }],
@@ -63,6 +73,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <main>{children}</main>
           <Footer />
         </SmoothScroll>
+        <Analytics />
       </body>
     </html>
   );
