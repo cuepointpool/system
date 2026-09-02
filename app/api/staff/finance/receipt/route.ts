@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminActor } from "@/lib/ecosystem/identity";
 import { getExpenseReceipt } from "@/lib/finance";
+import { financeViewer } from "@/lib/partners";
 
 export const dynamic = "force-dynamic";
 
 /** Serves an expense's receipt image so `<img src>` can render it directly. */
 export async function GET(req: NextRequest) {
-  if (!(await adminActor(req)))
-    return NextResponse.json({ error: "Admins only" }, { status: 403 });
+  if (!(await financeViewer(req)))
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 422 });
 

@@ -2582,7 +2582,24 @@ type FinPartner = {
   name: string;
   active: boolean;
   sortOrder: number;
+  username: string | null;
+  positions: string[];
 };
+
+const PARTNER_POSITION_LABELS: Record<string, string> = {
+  director: "Director",
+  it_admin: "IT Admin",
+  secretary: "Secretary",
+  marketing: "Marketing",
+  treasurer: "Treasurer",
+};
+const PARTNER_POSITION_ORDER = [
+  "director",
+  "it_admin",
+  "secretary",
+  "marketing",
+  "treasurer",
+];
 type FinContribution = {
   id: string;
   partnerId: string;
@@ -2662,7 +2679,13 @@ async function fileToDataUrl(
   }
 }
 
-function FinanceTab({ headers }: { headers: Record<string, string> }) {
+export function FinanceTab({
+  headers,
+  readOnly = false,
+}: {
+  headers: Record<string, string>;
+  readOnly?: boolean;
+}) {
   const [data, setData] = useState<FinanceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -2770,13 +2793,40 @@ function FinanceTab({ headers }: { headers: Record<string, string> }) {
                 return (
                   <tr key={p.id} className="text-white/90">
                     <td className="px-4 py-2.5">
-                      <PartnerName
-                        name={p.name}
-                        busy={busy}
-                        onSave={(name) =>
-                          send("PATCH", { kind: "partner", id: p.id, name })
-                        }
-                      />
+                      {readOnly ? (
+                        <span className="text-white/90">{p.name}</span>
+                      ) : (
+                        <PartnerName
+                          name={p.name}
+                          busy={busy}
+                          onSave={(name) =>
+                            send("PATCH", { kind: "partner", id: p.id, name })
+                          }
+                        />
+                      )}
+                      {p.positions.length > 0 && (
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {[...p.positions]
+                            .sort(
+                              (a, b) =>
+                                PARTNER_POSITION_ORDER.indexOf(a) -
+                                PARTNER_POSITION_ORDER.indexOf(b),
+                            )
+                            .map((pos) => (
+                              <span
+                                key={pos}
+                                className={cn(
+                                  "rounded-full px-2 py-0.5 text-[10px]",
+                                  pos === "treasurer"
+                                    ? "bg-teal/15 text-teal"
+                                    : "bg-white/10 text-mist",
+                                )}
+                              >
+                                {PARTNER_POSITION_LABELS[pos] ?? pos}
+                              </span>
+                            ))}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       {formatLKR(pos?.contributed ?? 0)}
@@ -2795,16 +2845,22 @@ function FinanceTab({ headers }: { headers: Record<string, string> }) {
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      <button
-                        disabled={busy}
-                        onClick={() => {
-                          if (confirm(`Remove ${p.name}? Their contributions go too.`))
-                            send("DELETE", `kind=partner&id=${p.id}`);
-                        }}
-                        className="text-[11px] text-rose-300/80 hover:text-rose-200"
-                      >
-                        Remove
-                      </button>
+                      {!readOnly && (
+                        <button
+                          disabled={busy}
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Remove ${p.name}? Their contributions go too.`,
+                              )
+                            )
+                              send("DELETE", `kind=partner&id=${p.id}`);
+                          }}
+                          className="text-[11px] text-rose-300/80 hover:text-rose-200"
+                        >
+                          Remove
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -2813,17 +2869,28 @@ function FinanceTab({ headers }: { headers: Record<string, string> }) {
           </table>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <ContribForm
-            partners={data.partners}
-            busy={busy}
-            onSubmit={(body) => send("POST", { kind: "contribution", ...body })}
-          />
-          <AddPartnerForm
-            busy={busy}
-            onSubmit={(name) => send("POST", { kind: "partner", name })}
-          />
-        </div>
+        {!readOnly && (
+          <>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <ContribForm
+                partners={data.partners}
+                busy={busy}
+                onSubmit={(body) =>
+                  send("POST", { kind: "contribution", ...body })
+                }
+              />
+              <AddPartnerForm
+                busy={busy}
+                onSubmit={(name) => send("POST", { kind: "partner", name })}
+              />
+            </div>
+            <PartnerAccessPanel
+              partners={data.partners}
+              headers={headers}
+              onSaved={load}
+            />
+          </>
+        )}
 
         {data.contributions.length > 0 && (
           <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10">
@@ -2845,15 +2912,17 @@ function FinanceTab({ headers }: { headers: Record<string, string> }) {
                     <td className="px-4 py-2.5">{formatLKR(c.amount)}</td>
                     <td className="px-4 py-2.5 text-mist">{c.note || "—"}</td>
                     <td className="px-4 py-2.5">
-                      <button
-                        disabled={busy}
-                        onClick={() =>
-                          send("DELETE", `kind=contribution&id=${c.id}`)
-                        }
-                        className="text-[11px] text-rose-300/80 hover:text-rose-200"
-                      >
-                        Delete
-                      </button>
+                      {!readOnly && (
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            send("DELETE", `kind=contribution&id=${c.id}`)
+                          }
+                          className="text-[11px] text-rose-300/80 hover:text-rose-200"
+                        >
+                          Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -2869,10 +2938,12 @@ function FinanceTab({ headers }: { headers: Record<string, string> }) {
           title="Expenses"
           sub="Each expense reduces either the capital balance or the operating (revenue) balance — you choose. Attach the bill or receipt."
         />
-        <ExpenseForm
-          busy={busy}
-          onSubmit={(body) => send("POST", { kind: "expense", ...body })}
-        />
+        {!readOnly && (
+          <ExpenseForm
+            busy={busy}
+            onSubmit={(body) => send("POST", { kind: "expense", ...body })}
+          />
+        )}
         <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wide text-mist">
@@ -2928,16 +2999,18 @@ function FinanceTab({ headers }: { headers: Record<string, string> }) {
                     )}
                   </td>
                   <td className="px-3 py-2.5">
-                    <button
-                      disabled={busy}
-                      onClick={() => {
-                        if (confirm("Delete this expense?"))
-                          send("DELETE", `kind=expense&id=${e.id}`);
-                      }}
-                      className="text-[11px] text-rose-300/80 hover:text-rose-200"
-                    >
-                      Delete
-                    </button>
+                    {!readOnly && (
+                      <button
+                        disabled={busy}
+                        onClick={() => {
+                          if (confirm("Delete this expense?"))
+                            send("DELETE", `kind=expense&id=${e.id}`);
+                        }}
+                        className="text-[11px] text-rose-300/80 hover:text-rose-200"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -2959,10 +3032,12 @@ function FinanceTab({ headers }: { headers: Record<string, string> }) {
           title="Daily cash & income"
           sub="Log the cash drawer when you open and close, and see each day's booking income against expenses."
         />
-        <CashForm
-          busy={busy}
-          onSubmit={(body) => send("POST", { kind: "cash", ...body })}
-        />
+        {!readOnly && (
+          <CashForm
+            busy={busy}
+            onSubmit={(body) => send("POST", { kind: "cash", ...body })}
+          />
+        )}
         <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10">
           <table className="w-full min-w-[820px] text-left text-sm">
             <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wide text-mist">
@@ -3064,6 +3139,150 @@ function mergeDaily(
     else map.set(c.date, { ...blankDaily, ...c });
   }
   return [...map.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+function PartnerAccessPanel({
+  partners,
+  headers,
+  onSaved,
+}: {
+  partners: FinPartner[];
+  headers: Record<string, string>;
+  onSaved: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+      <p className="text-xs font-medium text-white">Partner logins & positions</p>
+      <p className="mt-1 text-[11px] text-mist">
+        Give a partner a username + password to sign in at{" "}
+        <span className="text-mist/80">/partners</span>. A partner with the{" "}
+        <span className="text-teal">Treasurer</span> position can edit finance;
+        any other signed-in partner sees it read-only.
+      </p>
+      <div className="mt-3 space-y-3">
+        {partners.map((p) => (
+          <PartnerAccessRow
+            key={p.id}
+            partner={p}
+            headers={headers}
+            onSaved={onSaved}
+          />
+        ))}
+        {partners.length === 0 && (
+          <p className="text-[11px] text-mist">Add a partner first.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PartnerAccessRow({
+  partner,
+  headers,
+  onSaved,
+}: {
+  partner: FinPartner;
+  headers: Record<string, string>;
+  onSaved: () => void;
+}) {
+  const [username, setUsername] = useState(partner.username ?? "");
+  const [password, setPassword] = useState("");
+  const [positions, setPositions] = useState<string[]>(partner.positions ?? []);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const toggle = (pos: string) =>
+    setPositions((cur) =>
+      cur.includes(pos) ? cur.filter((x) => x !== pos) : [...cur, pos],
+    );
+
+  const dirty =
+    username !== (partner.username ?? "") ||
+    password.length > 0 ||
+    positions.slice().sort().join() !==
+      (partner.positions ?? []).slice().sort().join();
+
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/partners", {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: partner.id,
+          username,
+          positions,
+          ...(password ? { password } : {}),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Could not save");
+      setPassword("");
+      setMsg("Saved");
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-white/10 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-[120px] text-sm text-white/90">
+          {partner.name}
+        </span>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="username"
+          className="input h-8 w-36 text-xs"
+        />
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={partner.username ? "new password" : "set password"}
+          type="text"
+          autoComplete="off"
+          className="input h-8 w-40 text-xs"
+        />
+        <button
+          disabled={busy || !dirty}
+          onClick={save}
+          className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+        {msg && <span className="text-[11px] text-teal">{msg}</span>}
+        {err && <span className="text-[11px] text-rose-300">{err}</span>}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {PARTNER_POSITION_ORDER.map((pos) => (
+          <label
+            key={pos}
+            className={cn(
+              "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+              positions.includes(pos)
+                ? "border-teal/40 bg-teal/10 text-teal"
+                : "border-white/10 text-mist",
+            )}
+          >
+            <input
+              type="checkbox"
+              className="h-3 w-3 accent-teal"
+              checked={positions.includes(pos)}
+              onChange={() => toggle(pos)}
+            />
+            {PARTNER_POSITION_LABELS[pos]}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function PartnerName({

@@ -16,6 +16,8 @@ const SECRET =
   "cue-point-dev-secret";
 
 export const SESSION_COOKIE = "cp_session";
+/** Separate session for business-partner logins (see lib/partners.ts). */
+export const PARTNER_COOKIE = "cp_partner";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 /* ---- passwords ---- */

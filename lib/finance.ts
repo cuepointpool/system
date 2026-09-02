@@ -14,6 +14,8 @@ export interface Partner {
   name: string;
   active: boolean;
   sortOrder: number;
+  username: string | null;
+  positions: string[];
 }
 export interface Contribution {
   id: string;
@@ -63,12 +65,16 @@ interface PartnerRow {
   name: string;
   active: boolean;
   sort_order: number;
+  username: string | null;
+  positions: string[] | null;
 }
 const toPartner = (r: PartnerRow): Partner => ({
   id: r.id,
   name: r.name,
   active: r.active,
   sortOrder: Number(r.sort_order),
+  username: r.username ?? null,
+  positions: r.positions ?? [],
 });
 
 export async function listPartners(): Promise<Partner[]> {

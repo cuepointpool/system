@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminActor } from "@/lib/ecosystem/identity";
+import { financeEditor, financeViewer } from "@/lib/partners";
 import {
   addContribution,
   addExpense,
@@ -21,8 +21,8 @@ export const dynamic = "force-dynamic";
 const MAX_RECEIPT_BYTES = 4_000_000; // ~4MB of base64
 
 export async function GET(req: NextRequest) {
-  if (!(await adminActor(req)))
-    return NextResponse.json({ error: "Admins only" }, { status: 403 });
+  if (!(await financeViewer(req)))
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   try {
     const [partners, contributions, expenses, cashDays, summary] =
       await Promise.all([
@@ -46,9 +46,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const actor = await adminActor(req);
+  const actor = await financeEditor(req);
   if (!actor)
-    return NextResponse.json({ error: "Admins only" }, { status: 403 });
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
 
   try {
@@ -138,9 +138,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const actor = await adminActor(req);
+  const actor = await financeEditor(req);
   if (!actor)
-    return NextResponse.json({ error: "Admins only" }, { status: 403 });
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   if (body.kind !== "partner" || !body.id)
     return NextResponse.json({ error: "Unsupported" }, { status: 422 });
@@ -153,9 +153,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const actor = await adminActor(req);
+  const actor = await financeEditor(req);
   if (!actor)
-    return NextResponse.json({ error: "Admins only" }, { status: 403 });
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   const sp = new URL(req.url).searchParams;
   const kind = sp.get("kind");
   const id = sp.get("id");

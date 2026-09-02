@@ -72,11 +72,17 @@ CREATE INDEX bookings_open_session_idx ON bookings (checked_in_at) WHERE checked
 -- (with receipt images), and the daily cash drawer. Admin-only in the console.
 
 CREATE TABLE business_partners (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  active     BOOLEAN NOT NULL DEFAULT TRUE,
-  sort_order INT NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  active        BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order    INT NOT NULL DEFAULT 0,
+  -- optional sign-in at /partners; 'treasurer' position may edit finance,
+  -- any other signed-in partner sees it read-only.
+  username      TEXT UNIQUE,
+  password_hash TEXT,
+  positions     TEXT[] NOT NULL DEFAULT '{}'
+    CHECK (positions <@ ARRAY['director','it_admin','secretary','marketing','treasurer']::text[]),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE capital_contributions (
