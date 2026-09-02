@@ -7,7 +7,7 @@ import { Reveal } from "./Reveal";
 
 export function Experience() {
   return (
-    <section id="experience" className="relative py-20 sm:py-28 md:py-32">
+    <section id="experience" className="relative overflow-hidden py-20 sm:py-28 md:py-32">
       <div className="pointer-events-none absolute left-1/2 top-16 -z-10 h-[360px] w-[820px] max-w-[140vw] -translate-x-1/2 rounded-full bg-teal/7 blur-[140px]" />
 
       <div className="mx-auto max-w-6xl px-5 md:px-8">

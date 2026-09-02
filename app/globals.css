@@ -40,6 +40,7 @@
 html {
   scroll-behavior: auto; /* Lenis handles smooth scroll */
   -webkit-tap-highlight-color: transparent;
+  overflow-x: clip; /* safety net: decorative blurs can't create sideways scroll */
 }
 
 body {
