@@ -1,28 +1,10 @@
 import type { NextConfig } from "next";
 
-const securityHeaders = [
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  {
-    key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
-  },
-  {
-    key: "Strict-Transport-Security",
-    value: "max-age=31536000; includeSubDomains",
-  },
-  {
-    key: "Content-Security-Policy",
-    value: "frame-ancestors 'none'; base-uri 'self'",
-  },
-];
-
+// Security response headers are applied at the edge (CloudFront response
+// headers policy) and by nginx on the origin — see DEPLOY-AWS.md. Keeping
+// them out of next.config avoids emitting each header twice.
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
-  },
 };
 
 export default nextConfig;
