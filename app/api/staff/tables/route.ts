@@ -46,6 +46,7 @@ export async function PATCH(req: NextRequest) {
       note: body.note,
       seats: body.seats,
       active: body.active,
+      bookable: body.bookable,
       sortOrder: body.sortOrder,
     },
     actor,

@@ -14,6 +14,7 @@ export interface VenueTable {
   seats: number;
   sortOrder: number;
   active: boolean;
+  bookable: boolean;
 }
 
 interface TableRow {
@@ -24,6 +25,7 @@ interface TableRow {
   seats: number;
   sort_order: number;
   active: boolean;
+  bookable: boolean;
 }
 
 function rowTo(r: TableRow): VenueTable {
@@ -35,6 +37,7 @@ function rowTo(r: TableRow): VenueTable {
     seats: Number(r.seats),
     sortOrder: Number(r.sort_order),
     active: r.active,
+    bookable: r.bookable ?? true,
   };
 }
 
@@ -105,6 +108,7 @@ export async function updateTable(
     note?: string;
     seats?: number;
     active?: boolean;
+    bookable?: boolean;
     sortOrder?: number;
   },
   actor: string,
@@ -120,6 +124,7 @@ export async function updateTable(
   if (patch.note !== undefined) add("note", patch.note.trim());
   if (patch.seats !== undefined) add("seats", clampSeats(patch.seats));
   if (patch.active !== undefined) add("active", !!patch.active);
+  if (patch.bookable !== undefined) add("bookable", !!patch.bookable);
   if (patch.sortOrder !== undefined) add("sort_order", Math.trunc(patch.sortOrder));
   if (sets.length === 0) return getTableById(id);
   vals.push(id);

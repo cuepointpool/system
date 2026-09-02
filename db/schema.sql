@@ -37,7 +37,8 @@ CREATE TABLE venue_tables (
   note       TEXT NOT NULL DEFAULT '',
   seats      INT  NOT NULL DEFAULT 4,
   sort_order INT  NOT NULL DEFAULT 0,
-  active     BOOLEAN NOT NULL DEFAULT TRUE,
+  active     BOOLEAN NOT NULL DEFAULT TRUE,   -- on the floor at all
+  bookable   BOOLEAN NOT NULL DEFAULT TRUE,   -- accepts online reservations (else view-only)
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX venue_tables_order_idx ON venue_tables (sort_order);

@@ -87,6 +87,7 @@ export default async function BookPage({
     area: t.area,
     note: t.note,
     seats: t.seats,
+    bookable: t.bookable,
   }));
 
   return (

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BookingInput, validateBooking } from "@/lib/booking";
-import { BookingConflict, UnknownTable, createBooking, listBookings } from "@/lib/db";
+import {
+  BookingConflict,
+  TableNotBookable,
+  UnknownTable,
+  createBooking,
+  listBookings,
+} from "@/lib/db";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { getTableById } from "@/lib/tables";
 
@@ -50,8 +56,14 @@ export async function POST(req: NextRequest) {
   const err = validateBooking(body);
   if (err) return NextResponse.json({ error: err }, { status: 422 });
 
-  if (!(await getTableById(String(body.tableId))))
+  const picked = await getTableById(String(body.tableId));
+  if (!picked)
     return NextResponse.json({ error: "Pick a table." }, { status: 422 });
+  if (!picked.bookable)
+    return NextResponse.json(
+      { error: "That table can only be booked in person — please call us." },
+      { status: 422 },
+    );
 
   const input: BookingInput = {
     tableId: body.tableId!,
@@ -73,7 +85,7 @@ export async function POST(req: NextRequest) {
     if (e instanceof BookingConflict) {
       return NextResponse.json({ error: e.message }, { status: 409 });
     }
-    if (e instanceof UnknownTable) {
+    if (e instanceof UnknownTable || e instanceof TableNotBookable) {
       return NextResponse.json({ error: e.message }, { status: 422 });
     }
     console.error("create booking error", e);

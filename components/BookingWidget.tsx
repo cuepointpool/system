@@ -12,7 +12,7 @@ import {
   priceFor,
   slotStartsForDate,
 } from "@/lib/booking";
-import { TABLE_HALF_HOUR_RATE, TABLE_HOURLY_RATE } from "@/lib/config";
+import { SITE, TABLE_HALF_HOUR_RATE, TABLE_HOURLY_RATE } from "@/lib/config";
 import {
   addDays,
   cn,
@@ -36,6 +36,7 @@ type FloorTable = {
   area: string;
   note: string;
   seats: number;
+  bookable: boolean;
   bookings: BookedInterval[];
 };
 
@@ -67,6 +68,7 @@ export type TableOption = {
   area: string;
   note: string;
   seats: number;
+  bookable: boolean;
 };
 
 /** minutes from midnight, pushing past-midnight labels into the same session day */
@@ -192,6 +194,8 @@ export function BookingWidget({
   }, [floor, tablesProp]);
 
   const selectedTable = tableList.find((t) => t.id === tableId) ?? null;
+  const lockedTables = tableList.filter((t) => t.bookable === false);
+  const openTables = tableList.filter((t) => t.bookable !== false);
 
   const fetchFloor = useCallback(async () => {
     setLoading(true);
@@ -262,6 +266,8 @@ export function BookingWidget({
   }
 
   function pick(tid: string, start: string) {
+    const t = tableList.find((x) => x.id === tid);
+    if (t && t.bookable === false) return; // view-only table
     setTableId(tid);
     setStartTime(start);
     setError(null);
@@ -553,6 +559,27 @@ export function BookingWidget({
                     <span className="h-2.5 w-4 rounded-sm bg-teal" /> your pick
                   </span>
                 </div>
+
+                {lockedTables.length > 0 && (
+                  <p className="mb-4 rounded-lg border border-teal/30 bg-teal/10 px-3 py-2.5 text-[11px] leading-relaxed text-teal-bright">
+                    <span className="font-semibold">Online booking</span> is open
+                    for{" "}
+                    <span className="font-semibold text-white">
+                      {openTables.map((t) => t.label).join(", ") || "—"}
+                    </span>
+                    .{" "}
+                    {lockedTables.map((t) => t.label).join(" & ")}{" "}
+                    {lockedTables.length > 1 ? "are" : "is"} shown below for live
+                    availability only — call{" "}
+                    <a
+                      href={SITE.phoneHref}
+                      className="font-semibold text-white underline"
+                    >
+                      {SITE.phone}
+                    </a>{" "}
+                    to reserve {lockedTables.length > 1 ? "them" : "it"}.
+                  </p>
+                )}
 
                 {/* tables */}
                 <div className="mt-4 space-y-3">
@@ -912,6 +939,11 @@ function TableCard({
           </span>
         </div>
         <span className="shrink-0 text-[11px] text-mist">
+          {!table.bookable && (
+            <span className="mr-2 rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-mist">
+              phone / in person
+            </span>
+          )}
           {table.bookings.length === 0
             ? "Wide open"
             : `${table.bookings.length} booked`}
@@ -963,7 +995,18 @@ function TableCard({
 
       {/* open start times */}
       <div className="mt-3">
-        {openStarts.length === 0 ? (
+        {!table.bookable ? (
+          <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-mist">
+            {table.bookings.length === 0
+              ? "Free right now."
+              : "See booked times above."}{" "}
+            This table isn&apos;t on online booking — call{" "}
+            <a href={SITE.phoneHref} className="text-teal underline">
+              {SITE.phone}
+            </a>{" "}
+            to reserve it.
+          </p>
+        ) : openStarts.length === 0 ? (
           <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-mist">
             No {durationLabel(duration)} slot free here on this day.
           </p>

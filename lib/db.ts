@@ -195,6 +195,7 @@ export interface TableDayAvailability {
   area: string;
   note: string;
   seats: number;
+  bookable: boolean;
   bookings: BookedInterval[];
 }
 
@@ -251,6 +252,7 @@ export async function getFloorAvailability(
       area: t.area,
       note: t.note,
       seats: t.seats,
+      bookable: t.bookable,
       bookings: (byTable.get(t.id) ?? []).sort((a, b) => a.startMin - b.startMin),
     })),
   };
@@ -305,6 +307,7 @@ export async function isTableFreeNow(tableId: string): Promise<boolean> {
 export async function createBooking(input: BookingInput): Promise<Booking> {
   const table = await getTableById(input.tableId);
   if (!table) throw new UnknownTable();
+  if (!table.bookable) throw new TableNotBookable();
   const total = priceFor(input.durationHrs);
   const booking: Booking = {
     id: crypto.randomUUID(),
@@ -708,5 +711,12 @@ export class UnknownTable extends Error {
   constructor() {
     super("That table isn't on the floor any more.");
     this.name = "UnknownTable";
+  }
+}
+
+export class TableNotBookable extends Error {
+  constructor() {
+    super("This table can't be reserved online — please call us to book it.");
+    this.name = "TableNotBookable";
   }
 }

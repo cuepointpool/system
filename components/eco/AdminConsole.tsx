@@ -55,6 +55,7 @@ type VenueTable = {
   seats: number;
   sortOrder: number;
   active: boolean;
+  bookable: boolean;
 };
 
 type StaffPlayer = {
@@ -1587,6 +1588,15 @@ function TablesTab({ headers }: { headers: Record<string, string> }) {
                 t.active ? `${t.label} hidden` : `${t.label} live`,
               )
             }
+            onToggleBookable={() =>
+              patch(
+                t.id,
+                { bookable: !t.bookable },
+                t.bookable
+                  ? `${t.label} — online booking off`
+                  : `${t.label} — online booking on`,
+              )
+            }
             onRemove={() => remove(t)}
           />
         ))}
@@ -1604,11 +1614,13 @@ function TableRowEditor({
   table,
   onSave,
   onToggle,
+  onToggleBookable,
   onRemove,
 }: {
   table: VenueTable;
   onSave: (patch: Record<string, unknown>) => void;
   onToggle: () => void;
+  onToggleBookable: () => void;
   onRemove: () => void;
 }) {
   const [label, setLabel] = useState(table.label);
@@ -1677,6 +1689,18 @@ function TableRowEditor({
           className="h-8 rounded-lg border border-white/12 px-3 text-xs text-white hover:border-teal/50"
         >
           {table.active ? "Hide" : "Show"}
+        </button>
+        <button
+          onClick={onToggleBookable}
+          className={cn(
+            "h-8 rounded-lg border px-3 text-xs hover:border-teal/50",
+            table.bookable
+              ? "border-teal/40 text-teal"
+              : "border-white/12 text-mist",
+          )}
+          title="Whether players can reserve this table online"
+        >
+          {table.bookable ? "Online: on" : "Online: off"}
         </button>
         <button
           onClick={onRemove}
