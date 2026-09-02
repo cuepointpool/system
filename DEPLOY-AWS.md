@@ -523,6 +523,76 @@ aws s3 rb "s3://$BUCKET" --force
 
 - **DB in the cloud:** the app's local `.env` points `DATABASE_URL` at `localhost` — the bootstrap script writes a fresh `.env` on the instance with Postgres running there, so nothing to change.
 - **`next build` memory:** the 2 GB swap in `user-data.sh` is what lets the build finish on a 1 GB instance. Don't skip it.
-- **Secure cookies:** `lib/auth.ts` sets the session cookie without `Secure`. It works fine behind CloudFront HTTPS; optionally add `secure: process.env.NODE_ENV === "production"` to the `res.cookies.set(...)` calls for defence in depth.
-- **Migrations** in `db/migrations/*.sql` are **not** auto-applied — run them manually (see §11) after a deploy that adds one. `npm run db:setup` **drops and recreates** the schema; only run it on first install.
+- **Migrations** in `db/migrations/*.sql` are **not** auto-applied — run them manually (see §11) after a deploy that adds one. `npm run db:setup` **drops and recreates** the schema; only run it on first install. The `postgres` OS user can't read files under `/home/cuepoint/` — copy the migration to `/tmp` first.
 - **Scaling up:** bigger box → change `--instance-type` (stop instance, `modify-instance-attribute`, start). True HA → put an ALB in front, launch a 2nd instance from an AMI of the first, move Postgres to RDS.
+
+---
+
+## 14. Security hardening (applied 2026-09-02)
+
+Replay these on a rebuild — they are not in `user-data.sh`.
+
+**App code** (already in the repo): `lib/rate-limit.ts` rate-limits the auth
+endpoints; session cookies set `Secure`; `next.config.ts` is just
+`poweredByHeader:false`.
+
+**CloudFront** — a response headers policy + a secret origin header:
+
+```bash
+ORIGIN_SECRET=$(python -c "import secrets;print(secrets.token_urlsafe(32))")
+
+# response headers policy (HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy,
+# Permissions-Policy, CSP frame-ancestors 'none'); then attach its Id to the
+# distribution's DefaultCacheBehavior.ResponseHeadersPolicyId
+aws cloudfront create-response-headers-policy --response-headers-policy-config '{...}'
+
+# add Origins.Items[0].CustomHeaders = X-Origin-Verify: $ORIGIN_SECRET, then
+aws cloudfront update-distribution --id "$CF_ID" --if-match <ETag> --distribution-config file://...
+```
+
+**nginx** — `/etc/nginx/snippets/security-headers.conf` (the six headers as
+`add_header ... always`) + `/etc/nginx/snippets/proxy-cuepoint.conf` (the
+`proxy_*` lines + `proxy_hide_header X-Powered-By` + the include). Site config:
+
+```nginx
+server {
+    listen 80 default_server;  server_name _;  client_max_body_size 12m;
+    if ($http_x_origin_verify != "REPLACE_WITH_ORIGIN_SECRET") { return 403; }
+    location / { include /etc/nginx/snippets/proxy-cuepoint.conf; }
+    location ~ ^/api/(auth|partner)/ {
+        limit_req zone=authlimit burst=20 nodelay;
+        include /etc/nginx/snippets/proxy-cuepoint.conf;
+    }
+}
+```
+
+Plus `/etc/nginx/conf.d/ratelimit.conf`
+(`limit_req_zone $binary_remote_addr zone=authlimit:10m rate=30r/m;`),
+`/etc/nginx/conf.d/realip-cloudfront.conf` (`set_real_ip_from` for each
+CloudFront origin-facing range from `ip-ranges.amazonaws.com`, then
+`real_ip_header X-Forwarded-For; real_ip_recursive on;`), and
+`server_tokens off;` in `nginx.conf`. **Restart** (not reload) nginx for the
+`if` to take effect.
+
+**Host:**
+
+```bash
+printf 'PermitRootLogin no\nX11Forwarding no\n' | sudo tee /etc/ssh/sshd_config.d/99-hardening.conf
+sudo systemctl reload ssh
+sudo apt-get install -y fail2ban && sudo systemctl enable --now fail2ban
+sudo mkdir -p /etc/systemd/system/cuepoint.service.d
+sudo tee /etc/systemd/system/cuepoint.service.d/hardening.conf <<'EOF'
+[Service]
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/home/cuepoint/app
+ProtectHome=read-only
+EOF
+sudo systemctl daemon-reload && sudo systemctl restart cuepoint
+sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
+```
+
+**Residual:** CloudFront→origin is still plain HTTP (needs a domain — §10 gives
+you origin TLS). Rotate the `cuepoint-deploy` access key / delete the user
+(§12) when you stop iterating.
