@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { BookingWidget } from "@/components/BookingWidget";
 import { HOURS_DISPLAY, SITE } from "@/lib/config";
 import { getViewer } from "@/lib/ecosystem/identity";
+import { partnerViewer } from "@/lib/partners";
 import { listTables } from "@/lib/tables";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,51 @@ export default async function BookPage({
   // staff & admin manage tables from the console, not the public booking flow
   const viewer = await getViewer();
   if (viewer && viewer.role !== "player") redirect("/admin");
+
+  // business partners aren't players — they can't book online
+  const partner = viewer ? null : await partnerViewer();
+  if (partner) {
+    return (
+      <div className="relative min-h-screen overflow-hidden pb-24 pt-28 sm:pb-28 sm:pt-32">
+        <div className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[820px] max-w-[140vw] -translate-x-1/2 rounded-full bg-teal/12 blur-[130px]" />
+        <div className="relative mx-auto max-w-lg px-5 md:px-8">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-xs text-mist transition-colors hover:text-white"
+          >
+            <span aria-hidden>←</span> Back to Cue Point
+          </Link>
+          <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.02] p-7">
+            <span className="text-xs uppercase tracking-[0.3em] text-teal">
+              Partner account
+            </span>
+            <h1 className="mt-3 font-display text-2xl font-bold text-white">
+              You&apos;re signed in as a partner
+            </h1>
+            <p className="mt-3 text-sm text-mist">
+              Partner accounts ({partner.name}) manage the business side of Cue
+              Point. To book a table, use a player account — sign in or create
+              one, then come back to this page.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link
+                href="/account"
+                className="btn-primary px-4 py-2 text-sm"
+              >
+                Player sign in
+              </Link>
+              <Link
+                href="/partners"
+                className="btn-ghost px-4 py-2 text-sm"
+              >
+                Go to partner portal
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const sp = await searchParams;
   const table = typeof sp.table === "string" ? sp.table : null;

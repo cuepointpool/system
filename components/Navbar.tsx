@@ -20,6 +20,13 @@ type Viewer = {
   rank: number;
 } | null;
 
+type Partner = {
+  name: string;
+  username: string | null;
+  positions: string[];
+  canEditFinance: boolean;
+} | null;
+
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -31,6 +38,7 @@ export function Navbar() {
   const [playOpen, setPlayOpen] = useState(false);
   const [acctOpen, setAcctOpen] = useState(false);
   const [viewer, setViewer] = useState<Viewer>(null);
+  const [partner, setPartner] = useState<Partner>(null);
 
   useEffect(() => {
     let last = window.scrollY;
@@ -55,18 +63,26 @@ export function Navbar() {
   const loadViewer = useCallback(() => {
     fetch("/api/me", { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setViewer(d.viewer))
+      .then((d) => {
+        setViewer(d.viewer);
+        setPartner(d.partner ?? null);
+      })
       .catch(() => {});
   }, []);
   useEffect(() => {
     loadViewer();
   }, [loadViewer, pathname]);
 
+  const isPartner = !viewer && !!partner;
+
   async function signOut() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch(isPartner ? "/api/partner/logout" : "/api/auth/logout", {
+      method: "POST",
+    });
     setAcctOpen(false);
     setOpen(false);
     setViewer(null);
+    setPartner(null);
     router.push("/");
     router.refresh();
   }
@@ -87,6 +103,11 @@ export function Navbar() {
   const navItems = isStaff
     ? MAIN_NAV.filter((i) => i.href !== "/book")
     : MAIN_NAV;
+  const cta = isStaff
+    ? { href: "/admin", label: "Staff console" }
+    : isPartner
+      ? { href: "/partners", label: "Partner portal" }
+      : { href: "/book", label: "Book a table" };
 
   return (
     <>
@@ -171,15 +192,16 @@ export function Navbar() {
           <div className="hidden items-center gap-3 xl:flex">
             <AccountMenu
               viewer={viewer}
+              partner={partner}
               open={acctOpen}
               setOpen={setAcctOpen}
               onSignOut={signOut}
             />
             <MagneticButton
-              href={isStaff ? "/admin" : "/book"}
+              href={cta.href}
               className="!px-5 !py-2.5 !text-[13px]"
             >
-              {isStaff ? "Staff console" : "Book a table"}
+              {cta.label}
               <Arrow />
             </MagneticButton>
           </div>
@@ -250,6 +272,23 @@ export function Navbar() {
                   </span>
                 </Link>
               )}
+              {isPartner && partner && (
+                <Link
+                  href="/partners"
+                  onClick={() => setOpen(false)}
+                  className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3"
+                >
+                  <PlayerAvatar name={partner.name} size="sm" />
+                  <span>
+                    <span className="block text-sm font-semibold text-white">
+                      {partner.name}
+                    </span>
+                    <span className="text-[11px] text-mist">
+                      partner · {partner.canEditFinance ? "finance (edit)" : "finance (view)"}
+                    </span>
+                  </span>
+                </Link>
+              )}
 
               <nav className="mt-6 flex flex-col">
                 {navItems.map((item, i) => (
@@ -303,6 +342,27 @@ export function Navbar() {
                     </button>
                   </div>
                 </div>
+              ) : isPartner ? (
+                <div className="mt-4 border-t border-white/10 pt-4">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.25em] text-teal">
+                    Partner
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Link
+                      href="/partners"
+                      onClick={() => setOpen(false)}
+                      className="rounded-xl border border-teal/30 bg-teal/[0.06] px-3 py-2.5 text-sm text-teal"
+                    >
+                      Partner portal
+                    </Link>
+                    <button
+                      onClick={signOut}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-left text-sm text-mist"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <Link
                   href="/account"
@@ -314,12 +374,8 @@ export function Navbar() {
               )}
 
               <div className="mt-auto flex flex-col gap-3 pt-6">
-                <MagneticButton
-                  href={isStaff ? "/admin" : "/book"}
-                  block
-                  className="justify-center"
-                >
-                  {isStaff ? "Staff console" : "Book a table"}
+                <MagneticButton href={cta.href} block className="justify-center">
+                  {cta.label}
                   <Arrow />
                 </MagneticButton>
                 <p className="text-center text-xs text-mist">
@@ -459,15 +515,67 @@ function MobileNavRow({
 
 function AccountMenu({
   viewer,
+  partner,
   open,
   setOpen,
   onSignOut,
 }: {
   viewer: Viewer;
+  partner: Partner;
   open: boolean;
   setOpen: (v: boolean) => void;
   onSignOut: () => void;
 }) {
+  if (!viewer && partner)
+    return (
+      <div
+        className="relative"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+      >
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] py-1 pl-1 pr-3 transition-colors hover:border-teal/30"
+        >
+          <PlayerAvatar name={partner.name} size="xs" />
+          <span className="text-[13px] font-medium text-white">
+            {partner.name}
+          </span>
+          <Chevron open={open} />
+        </button>
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.18 }}
+              className="absolute right-0 top-full w-60 pt-3"
+            >
+              <div className="overflow-hidden rounded-2xl border border-white/10 glass-strong p-1.5 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.8)]">
+                <div className="px-3 py-2 text-[11px] text-mist">
+                  Signed in as{" "}
+                  <span className="text-white">{partner.name}</span> · partner
+                </div>
+                <Link
+                  href="/partners"
+                  onClick={() => setOpen(false)}
+                  className="block rounded-xl px-3 py-2 text-[13px] text-teal transition-colors hover:bg-white/[0.06]"
+                >
+                  Partner portal
+                </Link>
+                <button
+                  onClick={onSignOut}
+                  className="mt-1 block w-full border-t border-white/10 px-3 pb-1 pt-2 text-left text-[13px] text-mist transition-colors hover:text-white"
+                >
+                  Sign out
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
   if (!viewer)
     return (
       <Link
