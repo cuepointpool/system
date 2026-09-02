@@ -35,21 +35,30 @@ export function AccountForm({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(
-        mode === "join" ? "/api/auth/register" : "/api/auth/login",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            mode === "join"
-              ? form
-              : { email: form.email, password: form.password },
-          ),
-        },
-      );
+      // Sign-in accepts either a player/staff email or a business-partner
+      // username. No "@" → treat it as a partner login.
+      const id = form.email.trim();
+      const partnerLogin = mode === "signin" && !id.includes("@");
+
+      const url = partnerLogin
+        ? "/api/partner/login"
+        : mode === "join"
+          ? "/api/auth/register"
+          : "/api/auth/login";
+      const body = partnerLogin
+        ? { username: id, password: form.password }
+        : mode === "join"
+          ? form
+          : { email: id, password: form.password };
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong");
-      router.push(nextPath);
+      router.push(partnerLogin ? "/partners" : nextPath);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -121,14 +130,18 @@ export function AccountForm({
           )}
         </AnimatePresence>
 
-        <Field label="Email">
+        <Field label={mode === "join" ? "Email" : "Email or partner username"}>
           <input
             className="input"
-            type="email"
+            type={mode === "join" ? "email" : "text"}
             value={form.email}
             onChange={set("email")}
-            autoComplete="email"
-            placeholder="you@email.com"
+            autoComplete={mode === "join" ? "email" : "username"}
+            placeholder={
+              mode === "join"
+                ? "you@email.com"
+                : "you@email.com or partner username"
+            }
           />
         </Field>
         <Field label="Password">
