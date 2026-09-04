@@ -207,6 +207,22 @@ export function Hero() {
           three taps. No calls, no waiting for a rack.
         </motion.p>
 
+        <motion.p
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.56, ease: [0.16, 1, 0.3, 1] }}
+          className="mt-4 flex max-w-xl flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-mist sm:text-[15px]"
+        >
+          <span className="rounded-full bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-navy-950">
+            New
+          </span>
+          <span>
+            <span className="font-semibold text-[#ffb066]">Campaign Mode</span> — 100
+            missions across 10 chapters. Every frame you play at Cue Point earns XP,
+            stars and rank.
+          </span>
+        </motion.p>
+
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -215,6 +231,19 @@ export function Hero() {
         >
           <MagneticButton href="/book">
             Book a table
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path
+                d="M3 8h10M9 4l4 4-4 4"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </MagneticButton>
+          <MagneticButton href="/campaign" variant="campaign">
+            <span aria-hidden>🎮</span>
+            Play Campaign Mode
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
               <path
                 d="M3 8h10M9 4l4 4-4 4"
