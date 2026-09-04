@@ -18,7 +18,7 @@ export default async function AccountPage({
   searchParams: Promise<{ mode?: string; next?: string }>;
 }) {
   const viewer = await getViewer();
-  if (viewer) redirect("/dashboard");
+  if (viewer) redirect(viewer.role === "player" ? "/campaign" : "/admin");
 
   const sp = await searchParams;
   const firstEver = (await countPlayers()) === 0;
@@ -47,7 +47,7 @@ export default async function AccountPage({
       <section className="mx-auto max-w-md px-5 pb-28 md:px-8">
         <AccountForm
           initialMode={sp.mode === "join" || firstEver ? "join" : "signin"}
-          nextPath={sp.next ?? "/dashboard"}
+          nextPath={sp.next ?? "/campaign"}
           firstEver={firstEver}
         />
       </section>

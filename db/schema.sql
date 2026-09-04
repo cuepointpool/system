@@ -144,6 +144,8 @@ CREATE TABLE player_profiles (
   membership_expiry TIMESTAMPTZ,
   loyalty_points    INT NOT NULL DEFAULT 0,
   loyalty_lifetime  INT NOT NULL DEFAULT 0,
+  campaign_xp       INT NOT NULL DEFAULT 0,
+  campaign_coins    INT NOT NULL DEFAULT 0,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX player_profiles_tier_idx ON player_profiles (membership_tier);
@@ -341,6 +343,28 @@ CREATE TABLE player_achievements (
   earned_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (player_id, achievement_id)
 );
+
+-- ------------------------------------------------------------- campaign ---
+-- The "game world" layer: Season 1's 100-mission campaign, separate from the
+-- Elo rankings above.
+--
+-- Mission CONTENT (chapters, titles, objectives, rewards, XP curve) is
+-- authored game content and lives in lib/campaign/content.ts — not here.
+-- This table stores only per-player PROGRESS, keyed by the mission ids that
+-- module emits ('m-001' … 'm-100'), so rewriting the missions never needs a
+-- migration.
+
+CREATE TABLE player_missions (
+  player_id       TEXT NOT NULL REFERENCES player_profiles(id) ON DELETE CASCADE,
+  mission_id      TEXT NOT NULL,             -- lib/campaign/content.ts id
+  objectives_done INT  NOT NULL DEFAULT 0,   -- how many objectives are ticked
+  stars           INT  NOT NULL DEFAULT 0,   -- 0-3, derived on write
+  started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at    TIMESTAMPTZ,               -- null = in progress
+  PRIMARY KEY (player_id, mission_id)
+);
+CREATE INDEX player_missions_player_idx ON player_missions (player_id);
+CREATE INDEX player_missions_done_idx ON player_missions (player_id, completed_at);
 
 -- ----------------------------------------------------- venue directory -----
 

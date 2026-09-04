@@ -4,8 +4,7 @@ import "./globals.css";
 import { SmoothScroll } from "@/components/SmoothScroll";
 import { ScrollProgress } from "@/components/ScrollProgress";
 import { Cursor } from "@/components/Cursor";
-import { Navbar } from "@/components/Navbar";
-import { Footer } from "@/components/Footer";
+import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { Analytics } from "@/components/Analytics";
 import { SITE } from "@/lib/config";
 
@@ -60,6 +59,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: "#05101c",
   colorScheme: "dark",
+  // the game shell draws to the edges and pads with env(safe-area-inset-*)
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -69,9 +70,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <SmoothScroll>
           <ScrollProgress />
           <Cursor />
-          <Navbar />
+          <SiteHeader />
           <main>{children}</main>
-          <Footer />
+          <SiteFooter />
         </SmoothScroll>
         <Analytics />
       </body>

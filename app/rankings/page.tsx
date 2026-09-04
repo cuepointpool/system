@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
-import { RankingsBoard } from "@/components/eco/RankingsBoard";
+import { LeaderboardTabs } from "@/components/eco/LeaderboardTabs";
+import { getCampaignLeaderboard } from "@/lib/campaign/progress";
 import { getLeaderboard } from "@/lib/ecosystem/store";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +14,10 @@ export const metadata: Metadata = {
 };
 
 export default async function RankingsPage() {
-  const rows = await getLeaderboard("all_time");
+  const [rows, gameRows] = await Promise.all([
+    getLeaderboard("all_time"),
+    getCampaignLeaderboard(),
+  ]);
   const top = rows[0];
 
   return (
@@ -42,7 +46,7 @@ export default async function RankingsPage() {
         }
       />
       <section className="mx-auto max-w-6xl px-5 pb-28 md:px-8">
-        {rows.length === 0 ? (
+        {rows.length === 0 && gameRows.length === 0 ? (
           <div className="rounded-[24px] border border-dashed border-white/15 bg-white/[0.02] p-12 text-center">
             <p className="font-display text-xl font-bold text-white">
               The board is empty
@@ -53,7 +57,7 @@ export default async function RankingsPage() {
             </p>
           </div>
         ) : (
-          <RankingsBoard initial={rows} />
+          <LeaderboardTabs official={rows} game={gameRows} />
         )}
       </section>
     </>

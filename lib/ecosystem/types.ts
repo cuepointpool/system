@@ -312,3 +312,6 @@ export interface LeaderboardRow extends PlayerLite {
   rankMovement: number;
   streak: number;
 }
+
+/* The campaign / "game world" has its own model — see lib/campaign/content.ts
+   (authored mission content) and lib/campaign/progress.ts (per-player state). */

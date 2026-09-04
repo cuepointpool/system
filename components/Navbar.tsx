@@ -99,9 +99,9 @@ export function Navbar() {
 
   const isAnchor = (href?: string) => !!href && href.includes("#");
   const isStaff = viewer?.role === "staff" || viewer?.role === "admin";
-  // staff book tables from the console, not the public online flow
+  // staff book tables from the console and don't play the campaign
   const navItems = isStaff
-    ? MAIN_NAV.filter((i) => i.href !== "/book")
+    ? MAIN_NAV.filter((i) => i.href !== "/book" && i.href !== "/campaign")
     : MAIN_NAV;
   const cta = isStaff
     ? { href: "/admin", label: "Staff console" }
@@ -167,6 +167,22 @@ export function Navbar() {
                     )}
                   </AnimatePresence>
                 </div>
+              ) : item.highlight ? (
+                <Link
+                  key={item.label}
+                  href={item.href!}
+                  data-cursor="hot"
+                  className="group relative inline-flex items-center gap-1.5 rounded-full bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] px-4 py-1.5 text-[13px] font-bold text-navy-950 shadow-[0_10px_30px_-10px_rgba(255,157,61,0.75)] transition-transform duration-300 hover:scale-105"
+                >
+                  <motion.span
+                    aria-hidden
+                    className="absolute inset-0 -z-10 rounded-full bg-[#ff9d3d]/60 blur-md"
+                    animate={{ opacity: [0.4, 0.85, 0.4] }}
+                    transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                  <span aria-hidden>🎮</span>
+                  {item.label}
+                </Link>
               ) : isAnchor(item.href) ? (
                 <button
                   key={item.label}
@@ -490,7 +506,19 @@ function MobileNavRow({
 
   const cls =
     "flex items-baseline gap-4 border-b border-white/10 py-4 text-left w-full";
-  const inner = (
+  const inner = item.highlight ? (
+    <>
+      <span aria-hidden className="text-xl">
+        🎮
+      </span>
+      <span className="font-display text-2xl font-semibold text-[#ffb066]">
+        {item.label}
+      </span>
+      <span className="rounded-full bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-navy-950">
+        Game world
+      </span>
+    </>
+  ) : (
     <>
       <span className="font-mono text-xs text-teal">
         0{index + 1}

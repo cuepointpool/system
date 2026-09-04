@@ -57,12 +57,15 @@ export const NAV_LINKS = [
 
 export type NavChild = { label: string; href: string; desc?: string };
 export type NavItem =
-  | { label: string; href: string; children?: undefined }
-  | { label: string; href?: undefined; children: NavChild[] };
+  | { label: string; href: string; children?: undefined; highlight?: boolean }
+  | { label: string; href?: undefined; children: NavChild[]; highlight?: undefined };
 
-/** primary site navigation (header) */
+/** primary site navigation (header). `highlight` gets its own gradient pill
+ *  treatment in the Navbar instead of the plain text-link style — used to
+ *  call out the Campaign game world so it doesn't get buried in a dropdown. */
 export const MAIN_NAV: NavItem[] = [
   { label: "Book a Table", href: "/book" },
+  { label: "Campaign", href: "/campaign", highlight: true },
   {
     label: "Play",
     children: [
@@ -82,6 +85,7 @@ export const MAIN_NAV: NavItem[] = [
 export const ACCOUNT_NAV: NavChild[] = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "My Profile", href: "/dashboard" }, // resolved to /players/<slug> in the UI
+  { label: "Campaign", href: "/campaign" },
   { label: "My Matches", href: "/matches" },
   { label: "Rewards", href: "/dashboard#loyalty" },
 ];

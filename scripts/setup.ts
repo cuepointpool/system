@@ -5,9 +5,11 @@
    venue record.
 
    NO players, matches, tournaments, promotions or activity are
-   inserted. Those are all created through the app (sign-up +
-   the staff console). The first account to register becomes the
-   admin.
+   inserted. Those are all created through the app (sign-up + the
+   staff console). The first account to register becomes the admin.
+
+   Campaign missions are NOT seeded — that content lives in
+   lib/campaign/content.ts; only per-player progress is in the DB.
 
    Run:  npm run db:setup
    ============================================================ */

@@ -18,6 +18,12 @@
   --color-paper: #ffffff;
   --color-mist: rgba(233, 244, 248, 0.72);
 
+  /* Campaign accents — gold is reserved for trophies, stars, boss missions
+     and champion states. Never use it for ordinary UI chrome. */
+  --color-gold: #f4c430;
+  --color-gold-bright: #ffd970;
+  --color-gold-deep: #c9971e;
+
   --font-display: var(--font-display), "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-sans), "Inter", ui-sans-serif, system-ui, sans-serif;
 
@@ -140,6 +146,22 @@ body::after {
 }
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* Safe-area helpers for the game shell (notch + home indicator). Requires
+   viewport-fit=cover, set via the root layout's viewport export. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@utility mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+/* Clears the fixed bottom nav (nav height + home indicator). */
+@utility pb-nav {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* Outline / stroke display type */
