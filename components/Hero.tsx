@@ -223,6 +223,21 @@ export function Hero() {
           </span>
         </motion.p>
 
+        <motion.p
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.59, ease: [0.16, 1, 0.3, 1] }}
+          className="mt-3 flex max-w-xl flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-mist sm:text-[15px]"
+        >
+          <span className="rounded-full bg-[linear-gradient(120deg,#a78bfa,#ec4899)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-navy-950">
+            New
+          </span>
+          <span>
+            <span className="font-semibold text-[#c4b5fd]">Friends Tournaments</span> — set
+            up your own 1v1 or 2v2 bracket, add your mates, and watch it update live.
+          </span>
+        </motion.p>
+
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -244,6 +259,19 @@ export function Hero() {
           <MagneticButton href="/campaign" variant="campaign">
             <span aria-hidden>🎮</span>
             Play Campaign Mode
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path
+                d="M3 8h10M9 4l4 4-4 4"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </MagneticButton>
+          <MagneticButton href="/play" variant="friends">
+            <span aria-hidden>🎱</span>
+            Create a Friends Tournament
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
               <path
                 d="M3 8h10M9 4l4 4-4 4"

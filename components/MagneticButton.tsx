@@ -9,7 +9,7 @@ type Props = {
   children: React.ReactNode;
   href?: string;
   onClick?: () => void;
-  variant?: "primary" | "ghost" | "campaign";
+  variant?: "primary" | "ghost" | "campaign" | "friends";
   className?: string;
   strength?: number;
   ariaLabel?: string;
@@ -53,7 +53,9 @@ export function MagneticButton({
       ? "btn-primary"
       : variant === "campaign"
         ? "btn-campaign"
-        : "btn-ghost",
+        : variant === "friends"
+          ? "btn-friends"
+          : "btn-ghost",
     className,
   );
 

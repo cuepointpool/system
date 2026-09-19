@@ -57,7 +57,14 @@ export const NAV_LINKS = [
 
 export type NavChild = { label: string; href: string; desc?: string };
 export type NavItem =
-  | { label: string; href: string; children?: undefined; highlight?: boolean }
+  | {
+      label: string;
+      href: string;
+      children?: undefined;
+      highlight?: boolean;
+      /** which highlight colour: default gold (Campaign), or violet (Friends) */
+      accent?: "friends";
+    }
   | { label: string; href?: undefined; children: NavChild[]; highlight?: undefined };
 
 /** primary site navigation (header). `highlight` gets its own gradient pill
@@ -66,6 +73,7 @@ export type NavItem =
 export const MAIN_NAV: NavItem[] = [
   { label: "Book a Table", href: "/book" },
   { label: "Campaign", href: "/campaign", highlight: true },
+  { label: "Friends", href: "/play", highlight: true, accent: "friends" },
   {
     label: "Play",
     children: [
@@ -86,6 +94,7 @@ export const ACCOUNT_NAV: NavChild[] = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "My Profile", href: "/dashboard" }, // resolved to /players/<slug> in the UI
   { label: "Campaign", href: "/campaign" },
+  { label: "Play with friends", href: "/play" },
   { label: "My Matches", href: "/matches" },
   { label: "Rewards", href: "/dashboard#loyalty" },
 ];

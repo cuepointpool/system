@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { PageHero } from "@/components/eco/Primitives";
 import { Dashboard } from "@/components/eco/Dashboard";
 import { getViewer } from "@/lib/ecosystem/identity";
+import { FriendsLeagueCard } from "@/components/friends/FriendsLeagueCard";
+import { getFriendPoints } from "@/lib/friends/store";
 import {
   getLoyaltyForPlayer,
   getMembershipPlans,
@@ -23,11 +25,12 @@ export default async function DashboardPage() {
   // staff & admin use the operations console, not a player dashboard
   if (viewer.role !== "player") redirect("/admin");
 
-  const [view, loyalty, plans, tournaments] = await Promise.all([
+  const [view, loyalty, plans, tournaments, friendPoints] = await Promise.all([
     getPlayerProfileView(viewer.slug),
     getLoyaltyForPlayer(viewer.id),
     getMembershipPlans(),
     getTournaments(),
+    getFriendPoints(viewer.id),
   ]);
   if (!view) redirect("/players");
   const membershipPlan =
@@ -62,6 +65,9 @@ export default async function DashboardPage() {
         }
         intro="Everything that matters between visits — where you rank, who you play next, what you've earned."
       />
+      <div className="mx-auto max-w-6xl px-5 pb-6 md:px-8">
+        <FriendsLeagueCard points={friendPoints} />
+      </div>
       <Dashboard
         view={view}
         loyalty={loyalty}

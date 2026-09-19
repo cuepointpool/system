@@ -2,6 +2,7 @@ import { Hero } from "@/components/Hero";
 import { Marquee } from "@/components/Marquee";
 import { About } from "@/components/About";
 import { Experience } from "@/components/Experience";
+import { FriendsPlay } from "@/components/FriendsPlay";
 import { Boards } from "@/components/Boards";
 import { Pricing } from "@/components/Pricing";
 import { Tables } from "@/components/Tables";
@@ -38,6 +39,7 @@ export default async function Home() {
       <Marquee />
       <About />
       <Experience />
+      <FriendsPlay />
       <Boards />
       <Pricing />
       <Tables tables={tables} />

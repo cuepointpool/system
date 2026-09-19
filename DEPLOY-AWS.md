@@ -596,3 +596,44 @@ sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
 **Residual:** CloudFront→origin is still plain HTTP (needs a domain — §10 gives
 you origin TLS). Rotate the `cuepoint-deploy` access key / delete the user
 (§12) when you stop iterating.
+
+---
+
+## 14. Friends play (games & tournaments, real-time)
+
+Friends can create 8-Ball games and knockout tournaments and see them update
+live. Real-time is **Server-Sent Events** from `GET /api/friends/stream`, fed by
+Postgres `LISTEN/NOTIFY` (one dedicated listener connection per Node process).
+No extra service is needed — it runs on the existing EC2 box.
+
+**Deploy order** (the new tables are additive, so run the migration first):
+
+```bash
+# on the box — postgres can't read /home/cuepoint, so copy it out first
+cat db/migrations/2026-09-19-friends-play.sql > /tmp/friends-play.sql
+sudo -u postgres psql cuepoint -f /tmp/friends-play.sql
+sudo -u cuepoint /home/cuepoint/deploy.sh
+```
+
+**CloudFront** needs no change: the default behaviour is CachingDisabled and
+forwards cookies, so the stream is never cached. The 30 s origin read timeout
+is longer than the stream's 15 s heartbeat. The browser reconnects on its own
+(and refetches everything) if a connection is ever cut.
+
+**nginx** — the stream sends `X-Accel-Buffering: no`, which nginx honours, but
+give it an explicit location so buffering and timeouts can never bite. Add above
+`location /` in `/etc/nginx/sites-available/cuepoint`, then **restart** nginx:
+
+```nginx
+    location = /api/friends/stream {
+        include /etc/nginx/snippets/proxy-cuepoint.conf;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        gzip off;
+    }
+```
+
+**Check after deploying:** sign in as two players in two browsers, invite one
+from the other, and confirm the invitation and the bell badge appear on the
+second screen within a second or two, without a refresh.

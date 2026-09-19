@@ -8,6 +8,7 @@ import { Logo } from "./Logo";
 import { MagneticButton } from "./MagneticButton";
 import { scrollToId } from "./SmoothScroll";
 import { PlayerAvatar } from "./eco/Primitives";
+import { NotificationBell } from "./friends/NotificationBell";
 import { ACCOUNT_NAV, MAIN_NAV, type NavItem } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
@@ -172,15 +173,23 @@ export function Navbar() {
                   key={item.label}
                   href={item.href!}
                   data-cursor="hot"
-                  className="group relative inline-flex items-center gap-1.5 rounded-full bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] px-4 py-1.5 text-[13px] font-bold text-navy-950 shadow-[0_10px_30px_-10px_rgba(255,157,61,0.75)] transition-transform duration-300 hover:scale-105"
+                  className={cn(
+                    "group relative inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-bold text-navy-950 transition-transform duration-300 hover:scale-105",
+                    item.accent === "friends"
+                      ? "bg-[linear-gradient(120deg,#a78bfa,#ec4899)] shadow-[0_10px_30px_-10px_rgba(167,139,250,0.75)]"
+                      : "bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] shadow-[0_10px_30px_-10px_rgba(255,157,61,0.75)]",
+                  )}
                 >
                   <motion.span
                     aria-hidden
-                    className="absolute inset-0 -z-10 rounded-full bg-[#ff9d3d]/60 blur-md"
+                    className={cn(
+                      "absolute inset-0 -z-10 rounded-full blur-md",
+                      item.accent === "friends" ? "bg-[#a78bfa]/60" : "bg-[#ff9d3d]/60",
+                    )}
                     animate={{ opacity: [0.4, 0.85, 0.4] }}
                     transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
                   />
-                  <span aria-hidden>🎮</span>
+                  <span aria-hidden>{item.accent === "friends" ? "🎱" : "🎮"}</span>
                   {item.label}
                 </Link>
               ) : isAnchor(item.href) ? (
@@ -206,6 +215,7 @@ export function Navbar() {
 
           {/* right cluster */}
           <div className="hidden items-center gap-3 xl:flex">
+            {viewer?.role === "player" && <NotificationBell />}
             <AccountMenu
               viewer={viewer}
               partner={partner}
@@ -222,17 +232,20 @@ export function Navbar() {
             </MagneticButton>
           </div>
 
-          <button
-            aria-label="Open menu"
-            onClick={() => setOpen(true)}
-            className="grid h-10 w-10 place-items-center rounded-xl glass xl:hidden"
-          >
-            <span className="flex flex-col gap-[5px]">
-              <span className="h-[2px] w-5 bg-white" />
-              <span className="h-[2px] w-5 bg-white" />
-              <span className="h-[2px] w-3 bg-teal" />
-            </span>
-          </button>
+          <div className="flex items-center gap-2 xl:hidden">
+            {viewer?.role === "player" && <NotificationBell />}
+            <button
+              aria-label="Open menu"
+              onClick={() => setOpen(true)}
+              className="grid h-10 w-10 place-items-center rounded-xl glass"
+            >
+              <span className="flex flex-col gap-[5px]">
+                <span className="h-[2px] w-5 bg-white" />
+                <span className="h-[2px] w-5 bg-white" />
+                <span className="h-[2px] w-3 bg-teal" />
+              </span>
+            </button>
+          </div>
         </div>
       </motion.header>
 
@@ -506,16 +519,29 @@ function MobileNavRow({
 
   const cls =
     "flex items-baseline gap-4 border-b border-white/10 py-4 text-left w-full";
+  const friends = item.accent === "friends";
   const inner = item.highlight ? (
     <>
       <span aria-hidden className="text-xl">
-        🎮
+        {friends ? "🎱" : "🎮"}
       </span>
-      <span className="font-display text-2xl font-semibold text-[#ffb066]">
+      <span
+        className={cn(
+          "font-display text-2xl font-semibold",
+          friends ? "text-[#c4b5fd]" : "text-[#ffb066]",
+        )}
+      >
         {item.label}
       </span>
-      <span className="rounded-full bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-navy-950">
-        Game world
+      <span
+        className={cn(
+          "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-navy-950",
+          friends
+            ? "bg-[linear-gradient(120deg,#a78bfa,#ec4899)]"
+            : "bg-[linear-gradient(120deg,#ffd166,#ff9d3d)]",
+        )}
+      >
+        {friends ? "Tournaments" : "Game world"}
       </span>
     </>
   ) : (

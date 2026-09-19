@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:setup": "node --env-file=.env --import tsx scripts/setup.ts"
+    "db:setup": "node --env-file=.env --import tsx scripts/setup.ts",
+    "test:friends": "node --import tsx scripts/test-friends.ts"
   },
   "dependencies": {
     "framer-motion": "^13.1.1",
