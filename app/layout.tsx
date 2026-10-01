@@ -6,6 +6,7 @@ import { ScrollProgress } from "@/components/ScrollProgress";
 import { Cursor } from "@/components/Cursor";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { Analytics } from "@/components/Analytics";
+import { OpeningNotice } from "@/components/OpeningNotice";
 import { SITE } from "@/lib/config";
 
 const display = Space_Grotesk({
@@ -74,6 +75,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <main>{children}</main>
           <SiteFooter />
         </SmoothScroll>
+        <OpeningNotice />
         <Analytics />
       </body>
     </html>

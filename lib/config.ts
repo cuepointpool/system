@@ -30,6 +30,17 @@ export const SITE = {
   },
 } as const;
 
+/** Full-screen "opening soon" notice shown once per visit. Set `enabled`
+ *  to false when the parlour opens. `openingDate` is optional free text
+ *  (e.g. "Saturday, 11 October") — leave it empty to show no date. */
+export const OPENING_NOTICE = {
+  enabled: true,
+  headline: "We're opening soon",
+  message:
+    "Cue Point is getting ready to open its doors in Pitipana, Homagama. Book your table now and be one of the first to play.",
+  openingDate: "",
+} as const;
+
 /** Opening hours, per weekday index (0 = Sun ... 6 = Sat). 24h strings;
  *  a close past midnight is written as 24:00+ (e.g. "26:00" = 2 AM next day). */
 export const HOURS: { open: string; close: string }[] = [
