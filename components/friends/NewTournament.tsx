@@ -9,6 +9,7 @@ import { generateBracket, roundName } from "@/lib/friends/bracket";
 import {
   FORMAT_LIST,
   FORMATS,
+  MAX_TOURNAMENT_TEAMS,
   MIN_TEAMS_TO_START,
   TOURNAMENT_SIZES,
   type FormatCode,
@@ -22,6 +23,8 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
   const router = useRouter();
   const [format, setFormat] = useState<FormatCode>("1v1");
   const [size, setSize] = useState<number>(8);
+  const [custom, setCustom] = useState(false);
+  const isCustom = custom;
   const [name, setName] = useState("");
   const [seeding, setSeeding] = useState<"random" | "ranking">("random");
   const [teams, setTeams] = useState<PickedPlayer[][]>([]);
@@ -136,10 +139,13 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
               <button
                 key={s}
                 type="button"
-                onClick={() => setSize(s)}
+                onClick={() => {
+                  setCustom(false);
+                  setSize(s);
+                }}
                 className={cn(
                   "rounded-xl border px-4 py-2.5 text-left transition-colors",
-                  size === s
+                  !isCustom && size === s
                     ? "border-[#a78bfa]/70 bg-[#a78bfa]/10"
                     : "border-white/10 bg-white/[0.02] hover:border-white/25",
                 )}
@@ -152,7 +158,32 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
                 </span>
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setCustom(true)}
+              className={cn(
+                "rounded-xl border px-4 py-2.5 text-left transition-colors",
+                isCustom
+                  ? "border-[#a78bfa]/70 bg-[#a78bfa]/10"
+                  : "border-white/10 bg-white/[0.02] hover:border-white/25",
+              )}
+            >
+              <span className="block font-display text-base font-semibold text-white">Any number</span>
+              <span className="text-[11px] text-mist">Odd sizes get BYEs</span>
+            </button>
           </div>
+          {isCustom && (
+            <div className="mt-3 flex items-center gap-3">
+              <GhostButton onClick={() => setSize((s) => Math.max(MIN_TEAMS_TO_START, s - 1))}>−</GhostButton>
+              <span className="min-w-[8rem] text-center font-display text-lg font-semibold text-white">
+                {size} {noun}s
+              </span>
+              <GhostButton onClick={() => setSize((s) => Math.min(MAX_TOURNAMENT_TEAMS, s + 1))}>+</GhostButton>
+              <span className="text-[11px] text-mist">
+                {MIN_TEAMS_TO_START}–{MAX_TOURNAMENT_TEAMS}
+              </span>
+            </div>
+          )}
           {format === "2v2" && (
             <p className="mt-3 text-xs text-mist">
               A 2v2 tournament of {size} teams needs {size} × 2 = <strong className="text-white">{size * 2} players</strong>.
@@ -248,6 +279,13 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
           >
             {check.message}
             {check.state === "short" && teams.length > 0 && " You can invite the rest after creating."}
+            {check.state === "short" && teams.length >= MIN_TEAMS_TO_START && (
+              <>
+                {" "}
+                Short on {noun}s? You can still start with the {teams.length} you have; empty places become
+                BYEs, or pick <strong className="text-white">Any number</strong> to match exactly.
+              </>
+            )}
           </p>
 
           {check.state === "over" && (
@@ -256,7 +294,12 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
                 Remove {teams.length - size} {noun}
                 {teams.length - size === 1 ? "" : "s"}
               </GhostButton>
-              <GhostButton onClick={() => setSize(TOURNAMENT_SIZES.find((s) => s >= teams.length) ?? 16)}>
+              <GhostButton
+                onClick={() => {
+                  setCustom(true);
+                  setSize(Math.min(MAX_TOURNAMENT_TEAMS, Math.max(MIN_TEAMS_TO_START, teams.length)));
+                }}
+              >
                 Change size
               </GhostButton>
               <GhostButton danger onClick={() => router.push("/play")}>

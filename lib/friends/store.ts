@@ -21,7 +21,8 @@ import {
   FORMATS,
   isFormat,
   MIN_TEAMS_TO_START,
-  TOURNAMENT_SIZES,
+  MAX_TOURNAMENT_TEAMS,
+  isValidTournamentSize,
   requiredTournamentPlayers,
   type FormatCode,
 } from "./formats";
@@ -1511,8 +1512,11 @@ export async function createTournament(
   if (!isFormat(input.format)) throw new FriendsError(400, "Choose 1v1 or 2v2.");
   const f = FORMATS[input.format];
   const capacity = Number(input.capacityTeams);
-  if (!(TOURNAMENT_SIZES as readonly number[]).includes(capacity))
-    throw new FriendsError(400, `Choose a size of ${TOURNAMENT_SIZES.join(", ")}.`);
+  if (!isValidTournamentSize(capacity))
+    throw new FriendsError(
+      400,
+      `Choose between ${MIN_TEAMS_TO_START} and ${MAX_TOURNAMENT_TEAMS} entries.`,
+    );
   const seeding = input.seeding === "ranking" ? "ranking" : "random";
   const teams = input.teams ?? [];
   if (teams.length > capacity)

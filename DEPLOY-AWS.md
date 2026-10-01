@@ -612,8 +612,16 @@ No extra service is needed — it runs on the existing EC2 box.
 # on the box — postgres can't read /home/cuepoint, so copy it out first
 cat db/migrations/2026-09-19-friends-play.sql > /tmp/friends-play.sql
 sudo -u postgres psql cuepoint -f /tmp/friends-play.sql
+# running as postgres makes postgres the owner → app gets "permission denied".
+# Hand every new table to the app's DB user:
+for t in friend_tournaments friend_games friend_teams friend_team_members friend_notifications friend_points; do
+  sudo -u postgres psql cuepoint -c "ALTER TABLE $t OWNER TO cuepoint"
+done
 sudo -u cuepoint /home/cuepoint/deploy.sh
 ```
+
+(Any future migration run as `postgres` needs the same `ALTER ... OWNER TO cuepoint`
+for each table, sequence and type it creates.)
 
 **CloudFront** needs no change: the default behaviour is CachingDisabled and
 forwards cookies, so the stream is never cached. The 30 s origin read timeout

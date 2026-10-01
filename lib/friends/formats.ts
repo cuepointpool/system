@@ -41,6 +41,15 @@ export const TOURNAMENT_SIZES = [4, 8, 16] as const;
 /** fewest complete teams a tournament can start with (the rest get BYEs) */
 export const MIN_TEAMS_TO_START = 3;
 
+/** largest custom tournament (entries); presets above are just shortcuts */
+export const MAX_TOURNAMENT_TEAMS = 32;
+
+/** any whole number of entries from MIN_TEAMS_TO_START to the max — the
+ *  bracket generator gives BYEs to whatever isn't a power of two */
+export function isValidTournamentSize(n: number): boolean {
+  return Number.isInteger(n) && n >= MIN_TEAMS_TO_START && n <= MAX_TOURNAMENT_TEAMS;
+}
+
 export function isFormat(v: unknown): v is FormatCode {
   return typeof v === "string" && v in FORMATS;
 }

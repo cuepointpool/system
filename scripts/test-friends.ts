@@ -2,7 +2,7 @@
    Run:  npm run test:friends */
 import assert from "node:assert/strict";
 import { generateBracket, nextPow2, roundName, seedOrder } from "../lib/friends/bracket";
-import { FORMATS, requiredGamePlayers, requiredTournamentPlayers } from "../lib/friends/formats";
+import { FORMATS, isValidTournamentSize, requiredGamePlayers, requiredTournamentPlayers } from "../lib/friends/formats";
 import { validateGameRoster, validateTeamSize, validateTournamentRoster } from "../lib/friends/validate";
 import { rosterKey } from "../lib/friends/points";
 
@@ -105,6 +105,18 @@ t("6-team bracket matches the spec", () => {
 
 t("roster key ignores order and duplicates", () => {
   assert.equal(rosterKey(["b", "a", "a"]), rosterKey(["a", "b"]));
+});
+
+t("any whole size from 3 to 32 is allowed, with BYEs filling the bracket", () => {
+  assert.equal(isValidTournamentSize(7), true);
+  assert.equal(isValidTournamentSize(3), true);
+  assert.equal(isValidTournamentSize(32), true);
+  assert.equal(isValidTournamentSize(2), false);
+  assert.equal(isValidTournamentSize(33), false);
+  assert.equal(isValidTournamentSize(5.5), false);
+  const b = generateBracket(Array.from({ length: 7 }, (_, i) => i));
+  assert.equal(b.byes, 1);
+  assert.equal(b.games.filter((g) => g.round === 1 && !g.isBye).length, 3);
 });
 
 console.log(`\n${n} passed`);
