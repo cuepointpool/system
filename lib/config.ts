@@ -17,8 +17,16 @@ export const SITE = {
     region: "Western Province",
     postalCode: "10200",
     country: "Sri Lanka",
-    geo: { lat: 6.8449, lng: 80.0028 },
-    maps: "https://www.google.com/maps/search/?api=1&query=Pitipana+Homagama",
+    /** Google Maps plus code for the front door */
+    plusCode: "R2RC+G8J, Homagama",
+    // from the "Cue Point" Google Maps listing
+    geo: { lat: 6.8413317, lng: 80.0207726 },
+    /** share link of the Google Maps listing — opens the listing itself */
+    maps: "https://maps.app.goo.gl/p3UmzSeh78miuQF57",
+    /** the listing's Google place id (from the share link) and its name on
+     *  Google — together they embed that exact listing */
+    googlePlaceId: "0x3ae2530042129313:0x1a6a53b019641c6a",
+    googleName: "Cue Point",
   },
   phone: "+94 77 026 2675",
   phoneHref: "tel:+94770262675",

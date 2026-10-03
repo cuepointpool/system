@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -17,10 +17,12 @@ const cta =
 
 export function Hero() {
   const [videoReady, setVideoReady] = useState(false);
-  // The hero clip is heavy (~11 MB). Skip it on small screens and on
-  // data-saver / slow connections — the still photo already carries the
-  // section. Load it only after the page is interactive on desktop.
+  // The desktop clip is heavy (~11 MB), so phones and tablets get a small
+  // (~0.6 MB) encode of the same footage. Either one loads only after the
+  // page is interactive, and neither on data-saver / slow connections — the
+  // still photo already carries the section.
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const bigScreen = window.matchMedia("(min-width: 1024px)").matches;
@@ -32,8 +34,8 @@ export function Hero() {
     const slow =
       conn?.saveData ||
       (conn?.effectiveType != null && /2g|slow/.test(conn.effectiveType));
-    if (!bigScreen || slow) return;
-    const load = () => setVideoSrc("/media/hero.mp4");
+    if (slow) return;
+    const load = () => setVideoSrc(bigScreen ? "/media/hero.mp4" : "/media/hero-mobile.mp4");
     const idle =
       "requestIdleCallback" in window
         ? (window.requestIdleCallback as (cb: () => void) => number)
@@ -47,6 +49,17 @@ export function Hero() {
       }
     };
   }, []);
+
+  // iOS only autoplays a video whose `muted` PROPERTY is set (React's
+  // attribute alone isn't always enough), so set it and start it by hand.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !videoSrc) return;
+    v.muted = true;
+    v.play().catch(() => {
+      /* autoplay refused (e.g. Low Power Mode) — the still photo stays */
+    });
+  }, [videoSrc]);
 
   const hours = HOURS_DISPLAY[0];
 
@@ -65,10 +78,11 @@ export function Hero() {
         className="-z-30 object-cover object-[50%_22%]"
       />
 
-      {/* video layer — desktop only, loads after the page is interactive,
-          fades in once it's actually playing */}
+      {/* video layer — loads after the page is interactive, fades in once
+          it's actually playing */}
       {videoSrc && (
         <video
+          ref={videoRef}
           onPlaying={() => setVideoReady(true)}
           className={
             "absolute inset-0 -z-20 h-full w-full object-cover transition-opacity duration-700 " +

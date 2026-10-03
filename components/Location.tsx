@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { HOURS_DISPLAY, SITE } from "@/lib/config";
-import { BrandMark } from "./BrandMark";
 import { MapEmbed } from "./MapEmbed";
 import { Reveal } from "./Reveal";
 import { SectionKicker } from "@/components/BrandMark";
@@ -32,6 +31,14 @@ export function Location() {
                     {h.day}, {h.time}
                   </span>
                 ))}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-6 border-b border-white/10 py-4">
+              <dt className="text-[15px] text-mist">Google Maps code</dt>
+              <dd className="text-[15px]">
+                <a href={SITE.address.maps} target="_blank" rel="noreferrer" className={linkClass}>
+                  {SITE.address.plusCode}
+                </a>
               </dd>
             </div>
             <div className="flex items-baseline justify-between gap-6 border-b border-white/10 py-4">
@@ -79,14 +86,6 @@ export function Location() {
         <Reveal delay={0.1}>
           <div className="relative h-[360px] overflow-hidden rounded-lg bg-navy-900 sm:h-[460px]">
             <MapEmbed />
-            {/* our mark, pinned on the venue (the map is centred on it) */}
-            <span className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-full flex-col items-center">
-              <span className="flex items-center gap-2 rounded-full bg-navy-950 py-1 pl-1 pr-3.5 text-[12px] font-bold text-white">
-                <BrandMark size={30} />
-                {SITE.name} Pool Parlour
-              </span>
-              <span className="h-3 w-0.5 bg-navy-950" />
-            </span>
           </div>
         </Reveal>
       </div>

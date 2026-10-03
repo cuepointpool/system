@@ -213,7 +213,7 @@ async function main() {
         JSON.stringify(["Espresso & mocktail bar", "Private VIP booth", "Coaching", "Live rankings"]),
         "+94 77 026 2675",
         JSON.stringify({ instagram: "https://instagram.com", facebook: "https://facebook.com" }),
-        "https://www.google.com/maps/search/?api=1&query=Pitipana+Homagama",
+        "https://maps.app.goo.gl/p3UmzSeh78miuQF57",
         null, 0, true, true, true,
       ],
     );

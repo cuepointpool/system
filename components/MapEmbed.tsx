@@ -1,9 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SITE } from "@/lib/config";
 
+// The same embed Google hands out under Share → "Embed a map": our own listing,
+// centred on its pin, zoomed to street level, with the place card. No API key.
+const { geo, googlePlaceId, googleName } = SITE.address;
+const SPAN_M = 1980; // metres shown across the map — about zoom 17
 const MAP_SRC =
-  "https://www.openstreetmap.org/export/embed.html?bbox=79.965%2C6.815%2C80.045%2C6.875&layer=mapnik&marker=6.845%2C80.005";
+  "https://www.google.com/maps/embed?pb=" +
+  [
+    `!1m18!1m12!1m3!1d${SPAN_M}!2d${geo.lng}!3d${geo.lat}`,
+    "!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1",
+    `!3m3!1m2!1s${encodeURIComponent(googlePlaceId)}!2s${encodeURIComponent(googleName)}`,
+    "!5e0!3m2!1sen!2slk!5m2!1sen!2slk",
+  ].join("");
 
 /** Click-/scroll-to-load map. Keeps the third-party iframe out of the
  *  initial render (weight + SEO) until the section is actually in view
@@ -31,9 +42,10 @@ export function MapEmbed() {
     <div ref={box} className="absolute inset-0">
       {show ? (
         <iframe
-          title="Map to Cue Point, Pitipana, Homagama"
-          className="absolute inset-0 h-full w-full"
+          title="Google map to Cue Point, Pitipana, Homagama"
+          className="absolute inset-0 h-full w-full border-0"
           loading="lazy"
+          allowFullScreen
           referrerPolicy="no-referrer-when-downgrade"
           src={MAP_SRC}
         />
