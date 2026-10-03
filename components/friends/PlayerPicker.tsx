@@ -10,6 +10,59 @@ export interface PickedPlayer {
   nickname: string;
   avatar: string | null;
   isYou?: boolean;
+  /** a name-only player with no account; `id` is "guest:<lowercased name>" */
+  guest?: boolean;
+}
+
+export function guestPlayer(name: string): PickedPlayer {
+  const clean = name.replace(/\s+/g, " ").trim().slice(0, 30);
+  return { id: `guest:${clean.toLowerCase()}`, slug: "", nickname: clean, avatar: null, guest: true };
+}
+
+/** Add a friend who has no account, by name only. */
+export function GuestAdder({
+  onAdd,
+  disabled,
+  placeholder = "Guest's name",
+}: {
+  onAdd: (p: PickedPlayer) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const [name, setName] = useState("");
+  const ok = name.trim().length >= 2;
+  const add = () => {
+    if (!ok) return;
+    onAdd(guestPlayer(name));
+    setName("");
+  };
+  return (
+    <div className="flex gap-2">
+      <input
+        value={name}
+        disabled={disabled}
+        maxLength={30}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            add();
+          }
+        }}
+        placeholder={placeholder}
+        autoComplete="off"
+        className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder:text-mist/60 focus:border-[#a78bfa]/60 focus:outline-none disabled:opacity-50"
+      />
+      <button
+        type="button"
+        onClick={add}
+        disabled={disabled || !ok}
+        className="shrink-0 rounded-xl border border-[#a78bfa]/60 px-4 text-sm font-semibold text-[#c4b5fd] transition-colors hover:bg-[#a78bfa]/10 disabled:opacity-40"
+      >
+        Add guest
+      </button>
+    </div>
+  );
 }
 
 /**

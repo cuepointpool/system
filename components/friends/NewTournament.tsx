@@ -16,7 +16,7 @@ import {
 } from "@/lib/friends/formats";
 import { validateTournamentRoster } from "@/lib/friends/validate";
 import { apiPost } from "./api";
-import { PlayerPicker, type PickedPlayer } from "./PlayerPicker";
+import { GuestAdder, PlayerPicker, type PickedPlayer } from "./PlayerPicker";
 import { Card, CountBar, GhostButton, Notice, PrimaryButton } from "./ui";
 
 export function NewTournament({ me }: { me: PickedPlayer }) {
@@ -88,7 +88,10 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
       format,
       capacityTeams: size,
       seeding,
-      teams: teams.map((t) => t.map((p) => p.id)),
+      teams: teams.map((t) => ({
+        playerIds: t.filter((p) => !p.guest).map((p) => p.id),
+        guests: t.filter((p) => p.guest).map((p) => p.nickname),
+      })),
     });
     if (!r.ok) {
       setError(r.error);
@@ -238,6 +241,14 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
           <div className="mt-3">
             <PlayerPicker exclude={new Set()} onPick={pick} />
           </div>
+          <div className="mt-4 border-t border-white/10 pt-4">
+            <p className="text-sm font-medium text-white">Friend not registered? Add them as a guest</p>
+            <p className="mb-3 mt-1 text-xs text-mist">
+              Just type a name. Guests can play, but a match with a guest earns nobody Friends League
+              points.
+            </p>
+            <GuestAdder onAdd={pick} />
+          </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             {!taken(me.id) && (
               <button
@@ -259,7 +270,8 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
             )}
           </div>
           <p className="mt-3 text-xs text-mist">
-            Only the players you add can see this tournament. You can keep inviting after you create it.
+            Only the registered players you add can see this tournament. You can keep adding people
+            after you create it.
           </p>
         </Card>
       </div>
@@ -324,6 +336,11 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
                     <PlayerAvatar key={p.id} name={p.nickname} src={p.avatar} size="xs" />
                   ))}
                   <span className="truncate">{t.map((p) => p.nickname).join(" & ")}</span>
+                  {t.some((p) => p.guest) && (
+                    <span className="shrink-0 rounded-full border border-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mist">
+                      Guest
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"

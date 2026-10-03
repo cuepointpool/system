@@ -15,12 +15,14 @@ import {
   createStaffBooking,
   deleteBooking,
   extendBooking,
+  getBookingById,
   listBookings,
   logCompletedVisit,
   setBookingPayment,
   startWalkInSession,
 } from "@/lib/db";
 import { staffActor } from "@/lib/ecosystem/identity";
+import { syncPointsForBooking } from "@/lib/ecosystem/loyalty-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +93,7 @@ export async function POST(req: NextRequest) {
         paid: body.paid !== false,
       };
       const booking = await logCompletedVisit(input, actor);
+      await syncPointsForBooking(booking);
       return NextResponse.json({ booking }, { status: 201 });
     }
 
@@ -131,6 +134,7 @@ export async function POST(req: NextRequest) {
     if (err) return NextResponse.json({ error: err }, { status: 422 });
 
     const booking = await createStaffBooking(draft as StaffBookingInput, actor);
+    await syncPointsForBooking(booking);
     return NextResponse.json({ booking }, { status: 201 });
   } catch (e) {
     if (e instanceof BookingConflict)
@@ -159,6 +163,7 @@ export async function PATCH(req: NextRequest) {
         const booking = await cancelBooking(id, actor);
         if (!booking)
           return NextResponse.json({ error: "Not found" }, { status: 404 });
+        await syncPointsForBooking(booking);
         return NextResponse.json({ booking });
       }
       case "extend": {
@@ -181,6 +186,7 @@ export async function PATCH(req: NextRequest) {
           },
           actor,
         );
+        await syncPointsForBooking(booking);
         return NextResponse.json({ booking });
       }
       case "checkout": {
@@ -194,6 +200,7 @@ export async function PATCH(req: NextRequest) {
           },
           actor,
         );
+        await syncPointsForBooking(booking);
         return NextResponse.json({ booking });
       }
       case "pay":
@@ -205,6 +212,7 @@ export async function PATCH(req: NextRequest) {
         );
         if (!booking)
           return NextResponse.json({ error: "Not found" }, { status: 404 });
+        await syncPointsForBooking(booking);
         return NextResponse.json({ booking });
       }
       default:
@@ -226,6 +234,8 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Staff only" }, { status: 401 });
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 422 });
+  const before = await getBookingById(id);
   await deleteBooking(id, actor);
+  await syncPointsForBooking(before); // takes back anything the booking earned
   return NextResponse.json({ ok: true });
 }

@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { OPENING_NOTICE, SITE } from "@/lib/config";
+import { BrandMark } from "./BrandMark";
 
 const SEEN_KEY = "cp_opening_notice_seen";
 
@@ -71,6 +72,7 @@ export function OpeningNotice() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-teal">
           {SITE.name} · {SITE.kicker}
         </p>
+        <BrandMark size={72} className="mt-6" />
         <h2
           id="opening-title"
           className="mt-5 font-display text-4xl font-bold leading-tight text-white sm:text-6xl"

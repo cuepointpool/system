@@ -145,6 +145,7 @@ CREATE TABLE player_profiles (
   loyalty_points    INT NOT NULL DEFAULT 0,
   loyalty_lifetime  INT NOT NULL DEFAULT 0,
   campaign_xp       INT NOT NULL DEFAULT 0,
+  supervisor_code_hash TEXT,              -- admins: hashed pass code that approves campaign progress
   campaign_coins    INT NOT NULL DEFAULT 0,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -527,3 +528,19 @@ CREATE TABLE IF NOT EXISTS friend_points (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS friend_points_player_idx ON friend_points (player_id, created_at DESC);
+
+-- Guest players in friend tournaments: a name in a seat, no account. Matches
+-- with a guest award no Friends League points.
+CREATE TABLE IF NOT EXISTS friend_team_guests (
+  id            TEXT PRIMARY KEY,
+  team_id       TEXT NOT NULL REFERENCES friend_teams(id) ON DELETE CASCADE,
+  tournament_id TEXT NOT NULL REFERENCES friend_tournaments(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  added_by      TEXT REFERENCES player_profiles(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS friend_guests_team_idx ON friend_team_guests (team_id);
+CREATE INDEX IF NOT EXISTS friend_guests_tournament_idx ON friend_team_guests (tournament_id);
+-- one guest name per tournament, whatever the capitalisation
+CREATE UNIQUE INDEX IF NOT EXISTS friend_guests_name_uq
+  ON friend_team_guests (tournament_id, lower(name));

@@ -28,6 +28,8 @@ export interface PlayerRef {
 
 export interface MemberView extends PlayerRef {
   status: MemberStatus;
+  /** a name-only player with no account (tournaments only); `id` is the guest row's id */
+  guest?: boolean;
 }
 
 export interface TeamView {
@@ -38,6 +40,8 @@ export interface TeamView {
   members: MemberView[];
   /** every seat filled by an accepted player */
   complete: boolean;
+  /** at least one seat is a guest — its matches earn no Friends League points */
+  hasGuest: boolean;
 }
 
 export interface GameViewer {
@@ -78,6 +82,8 @@ export interface GameView {
   roundName: string | null;
   position: number | null;
   isBye: boolean;
+  /** a guest is playing on either side, so no Friends League points are awarded */
+  guestMatch: boolean;
   version: number;
   createdAt: string;
   startedAt: string | null;
@@ -115,8 +121,10 @@ export interface TournamentView {
   teams: TeamView[];
   /** teams that have every seat filled by an accepted player */
   teamsComplete: number;
-  /** accepted players across all teams */
+  /** accepted players across all teams (guests included) */
   playersJoined: number;
+  /** how many of those are guests */
+  guests: number;
   rounds: BracketRound[];
   byes: number;
   champion: TeamView | null;

@@ -5,7 +5,7 @@ import { TABLE_HOURLY_RATE } from "@/lib/config";
  *  Rendered server-side so crawlers and LLMs see it in the initial HTML. */
 export function HomeJsonLd() {
   const { url, name, description, phone, email, address } = SITE;
-  const img = `${url}/media/cover.png`;
+  const img = `${url}/media/og-logo.png`;
 
   const graph = [
     {

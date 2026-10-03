@@ -30,18 +30,20 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 
 /* ---- venue configuration (edit these to match the business) ---- */
 
+/* Prices, discounts and multipliers must match lib/ecosystem/economics.ts —
+   `npm run test:membership` proves a plan can't give back more than its fee. */
 const MEMBERSHIP_PLANS = [
   {
     id: "basic",
     name: "Basic",
     price: 0,
     billing_period: "monthly",
-    tagline: "Your Cue Point identity — free forever",
+    tagline: "Free. Your Cue Point account.",
     benefits: [
-      "Member table pricing",
-      "Full booking history",
-      "Public player profile & stats",
-      "Loyalty points on every visit",
+      "Book tables online",
+      "Player profile with your stats and match history",
+      "A place on the rankings",
+      "1 point for every LKR 10 of table time",
     ],
     discount_pct: 0,
     booking_priority: 1,
@@ -54,13 +56,12 @@ const MEMBERSHIP_PLANS = [
     name: "Pro",
     price: 1500,
     billing_period: "monthly",
-    tagline: "For players in the ranked scene",
+    tagline: "For regulars who play most weeks.",
     benefits: [
-      "10% off all table time",
-      "Priority booking window (48h ahead)",
-      "Ranked & league match eligibility",
-      "20% off tournament entry",
-      "1.5× loyalty earning",
+      "10% off table time",
+      "1.5× points on table time",
+      "Pro badge on your player profile",
+      "Everything in Basic",
     ],
     discount_pct: 10,
     booking_priority: 2,
@@ -73,14 +74,12 @@ const MEMBERSHIP_PLANS = [
     name: "Elite",
     price: 3500,
     billing_period: "monthly",
-    tagline: "The full Cue Point membership",
+    tagline: "For players who are here all the time.",
     benefits: [
-      "18% off all table time",
-      "Top booking priority (7 days ahead)",
-      "Free entry to premium tournaments",
-      "Elite player badge on your profile",
-      "2× loyalty earning + monthly bonus",
-      "Exclusive promotions & guest passes",
+      "18% off table time",
+      "2× points on table time",
+      "Elite badge on your player profile",
+      "Everything in Basic",
     ],
     discount_pct: 18,
     booking_priority: 3,
@@ -131,12 +130,13 @@ const ACHIEVEMENTS = [
   ["unbeaten_month", "Untouchable", "A calendar month without a loss", "crown", "platinum"],
 ];
 
+/* Points = what the reward costs us ÷ LKR 0.50 (see lib/ecosystem/economics.ts). */
 const REWARDS = [
-  ["rw_play30", "30 minutes free play", "On any standard pool table", 800, "play", "clock"],
-  ["rw_play60", "1 hour free play", "On any standard pool table", 1500, "play", "clock"],
-  ["rw_disc15", "15% booking discount", "One booking, up to 3 hours", 1000, "discount", "tag"],
-  ["rw_tourney", "Tournament entry credit", "LKR 1,500 toward any entry fee", 2200, "tournament", "trophy"],
-  ["rw_food", "Snack & drink combo", "From the Cue Point bar", 600, "food", "cup"],
+  ["rw_play30", "30 minutes free play", "On any table", 800, "play", "clock"],
+  ["rw_play60", "1 hour free play", "On any table", 1600, "play", "clock"],
+  ["rw_disc15", "15% booking discount", "One booking, up to 3 hours", 750, "discount", "tag"],
+  ["rw_tourney", "Tournament entry credit", "LKR 1,500 toward any entry fee", 3000, "tournament", "trophy"],
+  ["rw_food", "Snack pack", "A Milo and a pack of cassava chips", 1000, "food", "cup"],
   ["rw_merch", "Cue Point chalk + glove set", "Branded player kit", 3000, "merch", "box"],
 ];
 

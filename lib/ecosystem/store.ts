@@ -1373,7 +1373,8 @@ export async function updatePlayer(
   );
   if (patch.membershipTier) {
     await query(
-      `UPDATE user_memberships SET plan_id = $2 WHERE player_id = $1 AND status = 'active'`,
+      `UPDATE user_memberships SET plan_id = $2, started_at = now()
+        WHERE player_id = $1 AND status = 'active' AND plan_id <> $2`,
       [id, patch.membershipTier],
     );
   }

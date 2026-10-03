@@ -42,9 +42,9 @@ export function MapEmbed() {
           type="button"
           onClick={() => setShow(true)}
           aria-label="Load the map"
-          className="absolute inset-0 grid place-items-center bg-navy-900/60 text-xs font-medium text-white/80 transition-colors hover:text-teal"
+          className="absolute inset-0 grid place-items-center bg-navy-900 text-sm font-semibold text-white underline underline-offset-4"
         >
-          <span className="rounded-full glass-strong px-4 py-2">Load map</span>
+          Load map
         </button>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { staffActor } from "@/lib/ecosystem/identity";
+import { adminActor, staffActor } from "@/lib/ecosystem/identity";
+import { syncPlayerMonthPoints } from "@/lib/ecosystem/loyalty-sync";
 import {
   computeStats,
   createPlayerByStaff,
@@ -40,6 +41,12 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   if (!String(body.fullName ?? "").trim() || !String(body.nickname ?? "").trim())
     return NextResponse.json({ error: "Name and player name required" }, { status: 422 });
+  const isAdmin = !!(await adminActor(req));
+  if (!isAdmin && body.membershipTier && body.membershipTier !== "basic")
+    return NextResponse.json(
+      { error: "Only an admin can put a player on a paid membership." },
+      { status: 403 },
+    );
   const player = await createPlayerByStaff(
     {
       fullName: String(body.fullName),
@@ -59,6 +66,14 @@ export async function PATCH(req: NextRequest) {
   if (!actor) return NextResponse.json({ error: "Staff only" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   if (!body.id) return NextResponse.json({ error: "Missing id" }, { status: 422 });
+  if (
+    (body.membershipTier !== undefined || body.role !== undefined) &&
+    !(await adminActor(req))
+  )
+    return NextResponse.json(
+      { error: "Only an admin can change a player's membership or role." },
+      { status: 403 },
+    );
   const updated = await updatePlayer(
     body.id,
     {
@@ -71,5 +86,16 @@ export async function PATCH(req: NextRequest) {
     },
     actor,
   );
+  if (body.membershipTier !== undefined) {
+    // table time already paid for today now earns at the new plan's rate
+    const month = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Colombo",
+      year: "numeric",
+      month: "2-digit",
+    }).format(new Date());
+    await syncPlayerMonthPoints(String(body.id), month).catch((e) =>
+      console.error("[loyalty] sync after membership change failed", e),
+    );
+  }
   return NextResponse.json({ ok: true, player: updated });
 }

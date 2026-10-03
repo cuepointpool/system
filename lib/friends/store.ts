@@ -270,6 +270,23 @@ async function loadTeams(
       });
     }
   }
+  // guests sit in a seat like anyone else, but have no account to accept with
+  if (out.size) {
+    const guests = await db<{ id: string; team_id: string; name: string }>(
+      `SELECT id, team_id, name FROM friend_team_guests
+        WHERE team_id = ANY($1) ORDER BY created_at`,
+      [[...out.keys()]],
+    );
+    for (const g of guests)
+      out.get(g.team_id)?.members.push({
+        id: g.id,
+        slug: "",
+        nickname: g.name,
+        avatar: null,
+        status: "accepted",
+        guest: true,
+      });
+  }
   return [...out.values()];
 }
 
@@ -282,6 +299,7 @@ function toTeamView(t: RawTeam, playersPerTeam: number): TeamView {
     complete:
       t.members.length === playersPerTeam &&
       t.members.every((m) => m.status === "accepted"),
+    hasGuest: t.members.some((m) => m.guest),
   };
 }
 
@@ -432,6 +450,7 @@ async function gameViews(
       roundName: g.round && total ? roundName(g.round, total) : null,
       position: g.position,
       isBye: g.is_bye,
+      guestMatch: !!teamA?.hasGuest || !!teamB?.hasGuest,
       version: g.version,
       createdAt: iso(g.created_at),
       startedAt: isoOrNull(g.started_at),
@@ -521,6 +540,7 @@ export async function getTournamentView(
       (n, x) => n + x.members.filter((m) => m.status === "accepted").length,
       0,
     ),
+    guests: teams.reduce((n, x) => n + x.members.filter((m) => m.guest).length, 0),
     rounds,
     byes: games.filter((g) => g.isBye).length,
     champion,
@@ -637,9 +657,12 @@ export async function listMyPlay(actor: Actor): Promise<MyPlay> {
        (SELECT count(*) FROM friend_teams ft
          WHERE ft.tournament_id = t.id
            AND (SELECT count(*) FROM friend_team_members m
-                 WHERE m.team_id = ft.id AND m.status = 'accepted') = t.players_per_team)::int AS teams_complete,
-       (SELECT count(*) FROM friend_team_members m
-         WHERE m.tournament_id = t.id AND m.status = 'accepted')::int AS players_joined,
+                 WHERE m.team_id = ft.id AND m.status = 'accepted')
+             + (SELECT count(*) FROM friend_team_guests gg WHERE gg.team_id = ft.id)
+             = t.players_per_team)::int AS teams_complete,
+       ((SELECT count(*) FROM friend_team_members m
+          WHERE m.tournament_id = t.id AND m.status = 'accepted')
+        + (SELECT count(*) FROM friend_team_guests gg WHERE gg.tournament_id = t.id))::int AS players_joined,
        EXISTS (SELECT 1 FROM friend_team_members m
                 WHERE m.tournament_id = t.id AND m.player_id = $1 AND m.status = 'invited') AS invited,
        (SELECT g.id FROM friend_games g
@@ -820,12 +843,43 @@ async function bumpTournament(c: PoolClient, id: string) {
 async function teamName(c: PoolClient, teamId: string | null): Promise<string> {
   if (!teamId) return "TBD";
   const rows = await inTx(c)<{ nickname: string }>(
-    `SELECT p.nickname FROM friend_team_members m
-       JOIN player_profiles p ON p.id = m.player_id
-      WHERE m.team_id = $1 ORDER BY m.created_at`,
+    `SELECT nickname FROM (
+       SELECT p.nickname, m.created_at, 0 AS guest FROM friend_team_members m
+         JOIN player_profiles p ON p.id = m.player_id
+        WHERE m.team_id = $1
+       UNION ALL
+       SELECT g.name, g.created_at, 1 FROM friend_team_guests g WHERE g.team_id = $1
+     ) x ORDER BY guest, created_at`,
     [teamId],
   );
   return rows.map((r) => r.nickname).join(" & ") || "TBD";
+}
+
+/** is a guest (a player with no account) sitting on this team? */
+async function teamHasGuest(c: PoolClient, teamId: string | null): Promise<boolean> {
+  if (!teamId) return false;
+  const rows = await inTx(c)<{ ok: number }>(
+    `SELECT 1 AS ok FROM friend_team_guests WHERE team_id = $1 LIMIT 1`,
+    [teamId],
+  );
+  return rows.length > 0;
+}
+
+/** remove tournament teams that have nobody left on them */
+async function dropEmptyTeams(c: PoolClient, tournamentId: string) {
+  await c.query(
+    `DELETE FROM friend_teams ft WHERE ft.tournament_id = $1
+       AND NOT EXISTS (SELECT 1 FROM friend_team_members m WHERE m.team_id = ft.id)
+       AND NOT EXISTS (SELECT 1 FROM friend_team_guests gg WHERE gg.team_id = ft.id)`,
+    [tournamentId],
+  );
+}
+
+/** a guest's display name: trimmed, single-spaced, 2–30 characters */
+function cleanGuestName(raw: unknown): string {
+  const s = String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, 30);
+  if (s.length < 2) throw new FriendsError(400, "A guest needs a name of at least 2 characters.");
+  return s;
 }
 
 async function teamPlayerIds(c: PoolClient, teamId: string | null): Promise<string[]> {
@@ -1166,6 +1220,14 @@ export async function reportResult(gameId: string, actor: Actor, winnerTeamId: s
     if (winnerTeamId !== g.team_a_id && winnerTeamId !== g.team_b_id)
       throw new FriendsError(400, "Pick one of the two sides as the winner.");
 
+    // the other side is all guests: nobody there has an account to confirm
+    // with, so the report stands (no points ride on a guest match anyway)
+    const opposing = mine === g.team_a_id ? g.team_b_id : g.team_a_id;
+    if ((await teamPlayerIds(c, opposing)).length === 0) {
+      await finalizeGame(c, g, winnerTeamId);
+      return;
+    }
+
     await c.query(
       `UPDATE friend_games
           SET result_status = 'reported', reported_winner_team_id = $2, reported_by = $3,
@@ -1350,11 +1412,22 @@ async function finalizeGame(c: PoolClient, g: GameRow, winnerTeamId: string) {
   const isSemi = !isFinal && g.round === rounds - 1;
   const href = tournamentPath(t.id);
 
-  if (t.points_eligible) {
+  // Guests keep the ledger honest: a match with a guest on either side pays
+  // nothing, and a tournament with any guest in it pays no placement points.
+  const guestMatch =
+    (await teamHasGuest(c, winnerTeamId)) || (await teamHasGuest(c, loserTeamId));
+  const [{ n: guestsInTournament }] = await inTx(c)<{ n: number }>(
+    `SELECT count(*)::int AS n FROM friend_team_guests WHERE tournament_id = $1`,
+    [t.id],
+  );
+
+  if (t.points_eligible && !guestMatch) {
     await addPoints(c, winners, FRIEND_POINTS.tournamentMatchWin, "match_win", {
       gameId: g.id,
       tournamentId: t.id,
     });
+  }
+  if (t.points_eligible && guestsInTournament === 0) {
     if (isFinal) {
       await addPoints(c, winners, FRIEND_POINTS.champion, "champion", { tournamentId: t.id });
       await addPoints(c, losers, FRIEND_POINTS.runnerUp, "runner_up", { tournamentId: t.id });
@@ -1442,17 +1515,57 @@ async function fillSlot(
 /*  TOURNAMENTS                                                        */
 /* ==================================================================== */
 
+/** one entry as the organizer builds it: registered players and/or named guests */
+export interface TeamInput {
+  playerIds: string[];
+  guests: string[];
+}
+
+async function checkGuestNames(c: PoolClient, t: TournamentRow, names: string[]) {
+  const lower = names.map((n) => n.toLowerCase());
+  if (uniq(lower).length !== lower.length)
+    throw new FriendsError(400, "Two guests can't share the same name.");
+  if (!names.length) return;
+  const [clash] = await inTx(c)<{ name: string }>(
+    `SELECT name FROM friend_team_guests WHERE tournament_id = $1 AND lower(name) = ANY($2)`,
+    [t.id, lower],
+  );
+  if (clash)
+    throw new FriendsError(
+      409,
+      `There is already a guest called ${clash.name} in this tournament. Use a different name.`,
+    );
+}
+
+async function insertGuest(
+  c: PoolClient,
+  t: TournamentRow,
+  teamId: string,
+  name: string,
+  actor: Actor,
+) {
+  await c.query(
+    `INSERT INTO friend_team_guests (id, team_id, tournament_id, name, added_by)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [nid("fgu"), teamId, t.id, name, actor.id],
+  );
+}
+
+/** validates a new entry; returns the cleaned guest names */
 async function checkNewTeam(
   c: PoolClient,
   t: TournamentRow,
   playerIds: string[],
-): Promise<Map<string, string>> {
+  guestNames: string[] = [],
+): Promise<string[]> {
   const f = FORMATS[t.format];
   const ids = uniq(playerIds);
   if (ids.length !== playerIds.length)
     throw new FriendsError(400, "A player can't be on the same team twice.");
-  const sizeErr = validateTeamSize(f, ids.length);
+  const guests = guestNames.map(cleanGuestName);
+  const sizeErr = validateTeamSize(f, ids.length + guests.length);
   if (sizeErr) throw new FriendsError(400, sizeErr);
+  await checkGuestNames(c, t, guests);
   const known = await existingPlayers(c, ids);
   if (known.size !== ids.length)
     throw new FriendsError(400, "One of the selected players could not be found.");
@@ -1467,7 +1580,7 @@ async function checkNewTeam(
       409,
       `${clash[0].nickname} is already a member of another team in this tournament.`,
     );
-  return known;
+  return guests;
 }
 
 async function insertTeam(
@@ -1476,6 +1589,7 @@ async function insertTeam(
   t: TournamentRow,
   playerIds: string[],
   actor: Actor,
+  guests: string[] = [],
 ) {
   const teamId = nid("ft");
   await c.query(`INSERT INTO friend_teams (id, tournament_id) VALUES ($1,$2)`, [teamId, t.id]);
@@ -1495,6 +1609,7 @@ async function insertTeam(
         tournamentPath(t.id),
       );
   }
+  for (const name of guests) await insertGuest(c, t, teamId, name, actor);
   return teamId;
 }
 
@@ -1505,7 +1620,7 @@ export async function createTournament(
     format: unknown;
     capacityTeams: unknown;
     seeding?: unknown;
-    teams?: string[][];
+    teams?: TeamInput[];
   },
 ): Promise<string> {
   if (actor.role !== "player") throw new FriendsError(403, "Only players can create tournaments.");
@@ -1547,8 +1662,8 @@ export async function createTournament(
     const t = await lockTournament(c, id);
     const batch = new Batch(c);
     for (const team of teams) {
-      await checkNewTeam(c, t, team);
-      await insertTeam(c, batch, t, team, actor);
+      const guests = await checkNewTeam(c, t, team.playerIds, team.guests);
+      await insertTeam(c, batch, t, team.playerIds, actor, guests);
     }
     await touchTournament(c, batch, id);
     await batch.flush();
@@ -1565,8 +1680,13 @@ function assertOpen(t: TournamentRow) {
     throw new FriendsError(409, "This tournament has already started or finished.");
 }
 
-/** organizer adds a team (1 player for 1v1, 2 for 2v2) */
-export async function addTeam(tournamentId: string, actor: Actor, playerIds: string[]) {
+/** organizer adds a team (1 player for 1v1, 2 for 2v2) — registered players and/or guests */
+export async function addTeam(
+  tournamentId: string,
+  actor: Actor,
+  playerIds: string[],
+  guestNames: string[] = [],
+) {
   await transaction(async (c) => {
     const t = await lockTournament(c, tournamentId);
     assertOrganizer(t, actor);
@@ -1580,9 +1700,59 @@ export async function addTeam(tournamentId: string, actor: Actor, playerIds: str
         409,
         `This tournament is already full (${n}/${t.capacity_teams} ${t.format === "1v1" ? "players" : "teams"}).`,
       );
-    await checkNewTeam(c, t, playerIds);
+    const guests = await checkNewTeam(c, t, playerIds, guestNames);
     const batch = new Batch(c);
-    await insertTeam(c, batch, t, playerIds, actor);
+    await insertTeam(c, batch, t, playerIds, actor, guests);
+    await bumpTournament(c, tournamentId);
+    await touchTournament(c, batch, tournamentId);
+    await batch.flush();
+  });
+}
+
+/** fill an open seat on a team with a guest (a name, no account) */
+export async function addTeamGuest(
+  tournamentId: string,
+  actor: Actor,
+  teamId: string,
+  rawName: string,
+) {
+  await transaction(async (c) => {
+    const t = await lockTournament(c, tournamentId);
+    assertOrganizer(t, actor);
+    assertOpen(t);
+    const name = cleanGuestName(rawName);
+    const [team] = await inTx(c)<{ id: string; n: number }>(
+      `SELECT ft.id,
+              ((SELECT count(*) FROM friend_team_members m WHERE m.team_id = ft.id)
+             + (SELECT count(*) FROM friend_team_guests gg WHERE gg.team_id = ft.id))::int AS n
+         FROM friend_teams ft WHERE ft.id = $1 AND ft.tournament_id = $2`,
+      [teamId, tournamentId],
+    );
+    if (!team) throw new FriendsError(404, "Team not found.");
+    if (team.n >= t.players_per_team)
+      throw new FriendsError(409, `A ${t.format} team must contain exactly ${t.players_per_team} players.`);
+    await checkGuestNames(c, t, [name]);
+    await insertGuest(c, t, teamId, name, actor);
+    const batch = new Batch(c);
+    await bumpTournament(c, tournamentId);
+    await touchTournament(c, batch, tournamentId);
+    await batch.flush();
+  });
+}
+
+/** organizer removes a guest (an entry left with nobody on it goes too) */
+export async function removeTournamentGuest(tournamentId: string, actor: Actor, guestId: string) {
+  await transaction(async (c) => {
+    const t = await lockTournament(c, tournamentId);
+    assertOrganizer(t, actor);
+    assertOpen(t);
+    const res = await c.query(
+      `DELETE FROM friend_team_guests WHERE id = $1 AND tournament_id = $2`,
+      [guestId, tournamentId],
+    );
+    if (!res.rowCount) throw new FriendsError(404, "That guest is not in this tournament.");
+    await dropEmptyTeams(c, tournamentId);
+    const batch = new Batch(c);
     await bumpTournament(c, tournamentId);
     await touchTournament(c, batch, tournamentId);
     await batch.flush();
@@ -1601,9 +1771,10 @@ export async function addTeamMember(
     assertOrganizer(t, actor);
     assertOpen(t);
     const [team] = await inTx(c)<{ id: string; n: number }>(
-      `SELECT t.id, count(m.*)::int AS n FROM friend_teams t
-         LEFT JOIN friend_team_members m ON m.team_id = t.id
-        WHERE t.id = $1 AND t.tournament_id = $2 GROUP BY t.id`,
+      `SELECT ft.id,
+              ((SELECT count(*) FROM friend_team_members m WHERE m.team_id = ft.id)
+             + (SELECT count(*) FROM friend_team_guests gg WHERE gg.team_id = ft.id))::int AS n
+         FROM friend_teams ft WHERE ft.id = $1 AND ft.tournament_id = $2`,
       [teamId, tournamentId],
     );
     if (!team) throw new FriendsError(404, "Team not found.");
@@ -1694,11 +1865,7 @@ export async function removeTournamentMember(
       [tournamentId, playerId],
     );
     if (!res.rowCount) throw new FriendsError(404, "That player is not in this tournament.");
-    await c.query(
-      `DELETE FROM friend_teams ft WHERE ft.tournament_id = $1
-         AND NOT EXISTS (SELECT 1 FROM friend_team_members m WHERE m.team_id = ft.id)`,
-      [tournamentId],
-    );
+    await dropEmptyTeams(c, tournamentId);
     const batch = new Batch(c);
     if (playerId !== actor.id)
       await batch.notify(playerId, "removed", `You were removed from ${t.name}.`, null);
@@ -1731,11 +1898,7 @@ export async function respondToTournament(tournamentId: string, actor: Actor, ac
         `DELETE FROM friend_team_members WHERE tournament_id = $1 AND player_id = $2`,
         [tournamentId, actor.id],
       );
-      await c.query(
-        `DELETE FROM friend_teams ft WHERE ft.tournament_id = $1
-           AND NOT EXISTS (SELECT 1 FROM friend_team_members x WHERE x.team_id = ft.id)`,
-        [tournamentId],
-      );
+      await dropEmptyTeams(c, tournamentId);
     }
     const batch = new Batch(c);
     if (t.organizer_id !== actor.id) {
@@ -1815,7 +1978,7 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
     const batch = new Batch(c);
     // drop unfinished teams and tell their members
     for (const team of incomplete) {
-      for (const m of team.members)
+      for (const m of team.members.filter((x) => !x.guest))
         await batch.notify(
           m.id,
           "removed",
@@ -1907,7 +2070,8 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
       );
     await bumpTournament(c, t.id);
     await touchTournament(c, batch, t.id);
-    for (const team of incomplete) for (const m of team.members) batch.touch(`user:${m.id}`);
+    for (const team of incomplete)
+      for (const m of team.members.filter((x) => !x.guest)) batch.touch(`user:${m.id}`);
     await batch.flush();
   });
 }

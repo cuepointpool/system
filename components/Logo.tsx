@@ -14,15 +14,15 @@ export function Logo({
 }) {
   const content = (
     <span className={cn("group inline-flex items-center gap-2.5", className)}>
-      <span className="relative grid h-9 w-9 place-items-center">
-        <span className="absolute inset-0 rounded-full bg-teal/25 blur-md transition-opacity duration-500 group-hover:opacity-100 opacity-60" />
+      {/* white disc: the navy half of the mark is invisible on a navy page */}
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white">
         <Image
           src={logoMark}
           alt="Cue Point"
           width={40}
           height={40}
           priority
-          className="relative h-9 w-9 object-contain drop-shadow-[0_2px_10px_rgba(0,194,168,0.35)]"
+          className="h-8 w-8 object-contain"
         />
       </span>
       {!compact && (

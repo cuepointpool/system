@@ -1,26 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
-  motion,
-  useMotionValue,
-  useScroll,
-  useSpring,
-  useTransform,
-} from "framer-motion";
-import { MagneticButton } from "./MagneticButton";
-import { scrollToId } from "./SmoothScroll";
-import logoMark from "@/public/media/logo-mark.png";
-import cover from "@/public/media/cover.png";
+  HOURS_DISPLAY,
+  OPENING_NOTICE,
+  SITE,
+  TABLE_HOURLY_RATE,
+} from "@/lib/config";
+import { formatLKR } from "@/lib/utils";
+import neonSign from "@/public/media/venue/neon-sign.jpg";
 
-const HEADLINE = ["Where", "every", "shot", "counts"];
+const cta =
+  "inline-flex items-center justify-center rounded-full px-7 py-3.5 text-[13px] font-bold uppercase tracking-[0.08em] text-navy-950 transition duration-200";
 
 export function Hero() {
-  const ref = useRef<HTMLElement>(null);
   const [videoReady, setVideoReady] = useState(false);
   // The hero clip is heavy (~11 MB). Skip it on small screens and on
-  // data-saver / slow connections — the still image already carries the
+  // data-saver / slow connections — the still photo already carries the
   // section. Load it only after the page is interactive on desktop.
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   useEffect(() => {
@@ -50,291 +48,79 @@ export function Hero() {
     };
   }, []);
 
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start start", "end start"],
-  });
-  const videoScale = useTransform(scrollYProgress, [0, 1], [1.05, 1.28]);
-  const videoY = useTransform(scrollYProgress, [0, 1], ["0%", "14%"]);
-  const overlay = useTransform(scrollYProgress, [0, 1], [0.18, 0.9]);
-  const contentY = useTransform(scrollYProgress, [0, 1], [0, -120]);
-  const contentOpacity = useTransform(scrollYProgress, [0, 0.55], [1, 0]);
-
-  // pointer parallax
-  const px = useMotionValue(0);
-  const py = useMotionValue(0);
-  const sx = useSpring(px, { stiffness: 60, damping: 18, mass: 0.6 });
-  const sy = useSpring(py, { stiffness: 60, damping: 18, mass: 0.6 });
-  const ballX = useTransform(sx, (v) => v * 40);
-  const ballY = useTransform(sy, (v) => v * 40);
-  const ringX = useTransform(sx, (v) => v * -22);
-  const ringY = useTransform(sy, (v) => v * -22);
-  const glowX = useTransform(sx, (v) => v * 70);
-  const glowY = useTransform(sy, (v) => v * 70);
-
-  function onMove(e: React.MouseEvent) {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    px.set((e.clientX - r.left) / r.width - 0.5);
-    py.set((e.clientY - r.top) / r.height - 0.5);
-  }
+  const hours = HOURS_DISPLAY[0];
 
   return (
     <section
       id="home"
-      ref={ref}
-      onMouseMove={onMove}
-      className="relative isolate flex min-h-[100svh] flex-col justify-center overflow-hidden pt-24 sm:pt-28"
+      className="relative isolate flex min-h-[100svh] flex-col justify-end overflow-hidden pb-14 pt-28 sm:pb-20"
     >
-      {/* still fallback behind the video */}
-      <motion.div style={{ scale: videoScale, y: videoY }} className="absolute inset-0 -z-30">
-        <Image
-          src={cover}
-          alt=""
-          aria-hidden
-          priority
-          fill
-          sizes="100vw"
-          className="scale-[1.6] object-cover object-[97%_50%] brightness-110 contrast-105"
-        />
-      </motion.div>
+      {/* the real sign on our wall — also the still behind the video */}
+      <Image
+        src={neonSign}
+        alt="The Cue Point Pool Parlour neon sign"
+        priority
+        fill
+        sizes="100vw"
+        className="-z-30 object-cover object-[50%_22%]"
+      />
 
       {/* video layer — desktop only, loads after the page is interactive,
           fades in once it's actually playing */}
       {videoSrc && (
-        <motion.div
-          style={{ scale: videoScale, y: videoY }}
-          className="absolute inset-0 -z-20"
+        <video
+          onPlaying={() => setVideoReady(true)}
+          className={
+            "absolute inset-0 -z-20 h-full w-full object-cover transition-opacity duration-700 " +
+            (videoReady ? "opacity-100" : "opacity-0")
+          }
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="none"
         >
-          <video
-            onPlaying={() => setVideoReady(true)}
-            className={
-              "h-full w-full object-cover transition-opacity duration-700 " +
-              (videoReady ? "opacity-100" : "opacity-0")
-            }
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="none"
-          >
-            <source src={videoSrc} type="video/mp4" />
-          </video>
-        </motion.div>
+          <source src={videoSrc} type="video/mp4" />
+        </video>
       )}
 
-      {/* colour + vignette overlays */}
-      <motion.div
-        style={{ opacity: overlay }}
-        className="absolute inset-0 -z-10 bg-gradient-to-b from-navy-950/40 via-navy-950/10 to-navy-950/85"
-      />
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-r from-navy-950 via-navy-950/45 to-transparent" />
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(80%_60%_at_50%_120%,rgba(0,194,168,0.22),transparent_60%)]" />
-      <div className="pointer-events-none absolute inset-0 -z-10 shadow-[inset_0_0_160px_30px_rgba(5,16,28,0.5)]" />
+      {/* darken the bottom so the copy reads over the photo */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-t from-navy-950 via-navy-950/70 to-navy-950/10" />
 
-      {/* floating decor */}
-      <motion.div
-        style={{ x: glowX, y: glowY }}
-        className="pointer-events-none absolute -left-24 top-24 -z-10 h-72 w-72 rounded-full bg-teal/20 blur-[90px]"
-      />
-      <motion.div
-        style={{ x: ringX, y: ringY }}
-        className="animate-float-slow pointer-events-none absolute right-[6%] top-[16%] hidden h-40 w-40 rounded-full border border-teal/20 md:block"
-      >
-        <div className="absolute inset-4 rounded-full border border-white/[0.06]" />
-        <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(0,194,168,0.35),transparent_60%)]" />
-      </motion.div>
-      <motion.div
-        style={{ x: ballX, y: ballY }}
-        className="pointer-events-none absolute bottom-[12%] right-[10%] hidden w-28 md:block lg:w-36"
-      >
-        <Image
-          src={logoMark}
-          alt=""
-          aria-hidden
-          className="animate-float-slow drop-shadow-[0_20px_50px_rgba(0,194,168,0.4)]"
-        />
-      </motion.div>
+      <div className="px-5 md:px-8 lg:px-12">
+        <p className="text-xs font-medium uppercase tracking-[0.32em] text-teal">
+          {OPENING_NOTICE.enabled ? "Opening soon" : "Now open"} ·{" "}
+          {SITE.address.line1}, {SITE.address.line2}
+        </p>
 
-      {/* content */}
-      <motion.div
-        style={{ y: contentY, opacity: contentOpacity }}
-        className="relative mx-auto w-full max-w-6xl px-5 md:px-8"
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-          className="mb-6 inline-flex items-center gap-2 rounded-full glass px-4 py-2 text-xs tracking-wide text-mist"
-        >
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal opacity-70" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-teal" />
-          </span>
-          Now open in Pitipana, Homagama
-        </motion.div>
-
-        <h1 className="font-display text-[clamp(2.6rem,9vw,7rem)] font-bold leading-[0.95] tracking-[-0.03em] text-white">
-          {HEADLINE.map((word, i) => (
-            <span key={word} className="mr-[0.25em] inline-block overflow-hidden align-bottom">
-              <motion.span
-                initial={{ y: "115%" }}
-                animate={{ y: 0 }}
-                transition={{
-                  duration: 1,
-                  delay: 0.15 + i * 0.09,
-                  ease: [0.16, 1, 0.3, 1],
-                }}
-                className={
-                  i === HEADLINE.length - 1
-                    ? "inline-block text-teal-gradient"
-                    : "inline-block"
-                }
-              >
-                {word}
-              </motion.span>
-            </span>
-          ))}
+        <h1 className="mt-4 max-w-5xl font-display text-[clamp(2.6rem,8vw,6.5rem)] font-bold leading-[0.95] tracking-[-0.02em] text-white">
+          {SITE.tagline}
         </h1>
 
-        <motion.p
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-6 max-w-xl text-[15px] text-mist sm:mt-7 sm:text-base md:text-lg"
-        >
-          Tournament-grade tables, a neon lounge and table service — reserved in
-          three taps. No calls, no waiting for a rack.
-        </motion.p>
+        <p className="mt-6 max-w-xl text-base leading-relaxed text-white/90 md:text-lg">
+          Three full-size 9ft pool tables, {formatLKR(TABLE_HOURLY_RATE)} an hour
+          on every one. Open {hours.time}, {hours.day.toLowerCase()}.
+        </p>
 
-        <motion.p
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.56, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-4 flex max-w-xl flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-mist sm:text-[15px]"
-        >
-          <span className="rounded-full bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-navy-950">
-            New
-          </span>
-          <span>
-            <span className="font-semibold text-[#ffb066]">Campaign Mode</span> — 100
-            missions across 10 chapters. Every frame you play at Cue Point earns XP,
-            stars and rank.
-          </span>
-        </motion.p>
-
-        <motion.p
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.59, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-3 flex max-w-xl flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-mist sm:text-[15px]"
-        >
-          <span className="rounded-full bg-[linear-gradient(120deg,#a78bfa,#ec4899)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-navy-950">
-            New
-          </span>
-          <span>
-            <span className="font-semibold text-[#c4b5fd]">Friends Tournaments</span> — set
-            up your own 1v1 or 2v2 bracket, add your mates, and watch it update live.
-          </span>
-        </motion.p>
-
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.62, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
-        >
-          <MagneticButton href="/book">
+        {/* the three ways in — same accent colours as the navbar pills */}
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <Link href="/book" className={`${cta} bg-teal hover:bg-teal-bright`}>
             Book a table
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path
-                d="M3 8h10M9 4l4 4-4 4"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </MagneticButton>
-          <MagneticButton href="/campaign" variant="campaign">
-            <span aria-hidden>🎮</span>
-            Play Campaign Mode
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path
-                d="M3 8h10M9 4l4 4-4 4"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </MagneticButton>
-          <MagneticButton href="/play" variant="friends">
-            <span aria-hidden>🎱</span>
-            Create a Friends Tournament
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path
-                d="M3 8h10M9 4l4 4-4 4"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </MagneticButton>
-          <MagneticButton
-            variant="ghost"
-            onClick={() => scrollToId("story")}
-            strength={0.25}
+          </Link>
+          <Link
+            href="/play"
+            className={`${cta} bg-[linear-gradient(120deg,#a78bfa,#ec4899)] hover:brightness-110`}
           >
-            Take the tour
-          </MagneticButton>
-        </motion.div>
-
-        <motion.ul
-          initial="hidden"
-          animate="show"
-          variants={{ show: { transition: { staggerChildren: 0.08, delayChildren: 0.8 } } }}
-          className="mt-10 flex flex-wrap gap-2.5 sm:mt-14 sm:gap-3"
-        >
-          {[
-            { k: "3", v: "pro tables" },
-            { k: "till 2AM", v: "every night" },
-            { k: "walk-ins", v: "always welcome" },
-          ].map((c) => (
-            <motion.li
-              key={c.v}
-              variants={{
-                hidden: { opacity: 0, y: 14 },
-                show: { opacity: 1, y: 0, transition: { ease: [0.16, 1, 0.3, 1] } },
-              }}
-              className="rounded-2xl glass px-4 py-3"
-            >
-              <span className="font-display text-lg font-semibold text-white">{c.k}</span>{" "}
-              <span className="text-xs text-mist">{c.v}</span>
-            </motion.li>
-          ))}
-        </motion.ul>
-      </motion.div>
-
-      {/* scroll cue */}
-      <motion.button
-        onClick={() => scrollToId("story")}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 1.4, duration: 1 }}
-        className="absolute bottom-7 left-1/2 hidden -translate-x-1/2 flex-col items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-mist sm:flex"
-        aria-label="Scroll to explore"
-      >
-        Scroll
-        <span className="relative flex h-9 w-5 justify-center rounded-full border border-white/[0.12]">
-          <motion.span
-            animate={{ y: [3, 14, 3] }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-            className="mt-1 h-1.5 w-1 rounded-full bg-teal"
-          />
-        </span>
-      </motion.button>
+            Friends tournament
+          </Link>
+          <Link
+            href="/campaign"
+            className={`${cta} bg-[linear-gradient(120deg,#ffd166,#ff9d3d)] hover:brightness-110`}
+          >
+            Campaign mode
+          </Link>
+        </div>
+      </div>
     </section>
   );
 }

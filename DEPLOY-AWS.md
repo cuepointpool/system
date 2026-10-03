@@ -645,3 +645,29 @@ give it an explicit location so buffering and timeouts can never bite. Add above
 **Check after deploying:** sign in as two players in two browsers, invite one
 from the other, and confirm the invitation and the bell badge appear on the
 second screen within a second or two, without a refresh.
+
+## 15. Guests, membership economics, campaign pass code (2026-10-04)
+
+Three migrations, all additive/idempotent. Run them **before** `deploy.sh`,
+as the app's DB user would own them (see the ownership note in §14):
+
+```bash
+cd /home/cuepoint/app && sudo -u cuepoint git pull
+for m in 2026-10-04-friend-guests 2026-10-04-membership-economics 2026-10-04-campaign-supervisor-code; do
+  cat db/migrations/$m.sql > /tmp/$m.sql
+  sudo -u postgres psql cuepoint -v ON_ERROR_STOP=1 -f /tmp/$m.sql
+done
+sudo -u postgres psql cuepoint -c "ALTER TABLE friend_team_guests OWNER TO cuepoint"
+sudo -u cuepoint /home/cuepoint/deploy.sh
+```
+
+- `friend-guests` — name-only guest players in friend tournaments.
+- `membership-economics` — **overwrites** the three plans' benefits/prices and the
+  six seeded rewards' points (see `lib/ecosystem/economics.ts`,
+  `npm run test:membership`). Review first if those were edited in the console.
+- `campaign-supervisor-code` — adds `player_profiles.supervisor_code_hash`. After
+  deploying, each admin sets their pass code in the admin console → Campaign tab;
+  until one exists, nobody can record Campaign Mode progress.
+
+Which tables take online bookings is data, not code: admin console → Tables →
+"Online: on/off" (`venue_tables.bookable`).

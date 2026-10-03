@@ -45,16 +45,22 @@ export function CampaignMapView({ initial }: { initial: CampaignState }) {
     [router],
   );
 
-  async function onObjectives(mission: MissionView, next: number) {
+  /** Record progress an admin has approved with their pass code. Resolves to
+   *  an error message, or null when it was saved. */
+  async function onObjectives(
+    mission: MissionView,
+    next: number,
+    code: string,
+  ): Promise<string | null> {
     setBusy(true);
     try {
       const res = await fetch("/api/campaign/mission", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ missionId: mission.id, objectivesDone: next }),
+        body: JSON.stringify({ missionId: mission.id, objectivesDone: next, code }),
       });
-      const data = await res.json();
-      if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return (data.error as string) || "Could not save. Try again.";
 
       const fresh: CampaignState = await fetch("/api/campaign", { cache: "no-store" }).then((r) =>
         r.json(),
@@ -66,6 +72,9 @@ export function CampaignMapView({ initial }: { initial: CampaignState }) {
         setTimeout(() => setToast(null), 2600);
         setOpenId(null);
       }
+      return null;
+    } catch {
+      return "Could not reach the server. Check your connection.";
     } finally {
       setBusy(false);
     }

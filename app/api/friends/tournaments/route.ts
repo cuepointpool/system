@@ -10,12 +10,20 @@ export async function POST(req: NextRequest) {
     const limited = rateLimit(`fcreate:${actor.id}`, 20, 60 * 60_000);
     if (limited) return limited;
     const b = await readBody(req);
+    // an entry is either a plain list of player ids, or { playerIds, guests }
+    const strs = (v: unknown) =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 8) : [];
     const teams = Array.isArray(b.teams)
-      ? b.teams
-          .slice(0, 64)
-          .map((t) =>
-            Array.isArray(t) ? t.filter((x): x is string => typeof x === "string").slice(0, 8) : [],
-          )
+      ? b.teams.slice(0, 64).map((t) =>
+          Array.isArray(t)
+            ? { playerIds: strs(t), guests: [] }
+            : t && typeof t === "object"
+              ? {
+                  playerIds: strs((t as { playerIds?: unknown }).playerIds),
+                  guests: strs((t as { guests?: unknown }).guests),
+                }
+              : { playerIds: [], guests: [] },
+        )
       : [];
     const id = await createTournament(actor, {
       name: str(b.name),

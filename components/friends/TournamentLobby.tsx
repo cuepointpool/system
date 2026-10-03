@@ -8,7 +8,7 @@ import { MIN_TEAMS_TO_START } from "@/lib/friends/formats";
 import type { GameView, TeamView, TournamentView } from "@/lib/friends/types";
 import { apiPost } from "./api";
 import { LiveDot } from "./GameLobby";
-import { PlayerPicker, type PickedPlayer } from "./PlayerPicker";
+import { GuestAdder, PlayerPicker, type PickedPlayer } from "./PlayerPicker";
 import { useLiveView } from "./useLiveView";
 import { Card, CountBar, GhostButton, Notice, PlayerLine, PrimaryButton, StatusPill } from "./ui";
 
@@ -64,6 +64,13 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
   const canAddTeam = v.canManage && t.teams.length < t.capacityTeams;
 
   async function addToDraft(p: PickedPlayer) {
+    const guestNames = new Set(
+      t.teams.flatMap((x) => x.members.filter((m) => m.guest).map((m) => m.nickname.toLowerCase())),
+    );
+    if (p.guest && guestNames.has(p.nickname.toLowerCase())) {
+      setError(`There is already a guest called ${p.nickname} in this tournament. Use a different name.`);
+      return;
+    }
     if (taken.has(p.id) || draft.some((d) => d.id === p.id)) {
       setError(
         t.playersPerTeam === 1
@@ -75,7 +82,10 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
     const next = [...draft, p];
     if (next.length === t.playersPerTeam) {
       setDraft([]);
-      await act("add-team", { playerIds: next.map((x) => x.id) });
+      await act("add-team", {
+        playerIds: next.filter((x) => !x.guest).map((x) => x.id),
+        guests: next.filter((x) => x.guest).map((x) => x.nickname),
+      });
     } else {
       setError(null);
       setDraft(next);
@@ -181,7 +191,11 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
                         right={
                           v.canManage ? (
                             <button
-                              onClick={() => act("remove-member", { playerId: m.id })}
+                              onClick={() =>
+                                m.guest
+                                  ? act("remove-guest", { guestId: m.id })
+                                  : act("remove-member", { playerId: m.id })
+                              }
                               disabled={busy}
                               aria-label={`Remove ${m.nickname}`}
                               className="grid h-6 w-6 place-items-center rounded-full text-xs text-mist hover:bg-red-400/20 hover:text-red-300"
@@ -208,6 +222,13 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
                         }
                         disabled={busy}
                       />
+                      <div className="mt-2">
+                        <GuestAdder
+                          placeholder="Or a guest's name"
+                          disabled={busy}
+                          onAdd={(p) => act("add-guest", { teamId: team.id, name: p.nickname })}
+                        />
+                      </div>
                     </div>
                   )}
                   {v.canManage && (
@@ -237,6 +258,11 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
                   </p>
                 )}
                 <PlayerPicker exclude={new Set()} onPick={addToDraft} disabled={busy} />
+                <p className="mb-2 mt-4 text-xs text-mist">
+                  Not registered? Add them as a guest. Matches with a guest earn no Friends League
+                  points.
+                </p>
+                <GuestAdder onAdd={addToDraft} disabled={busy} />
                 {draft.length > 0 && (
                   <button
                     onClick={() => setDraft([])}
@@ -429,6 +455,10 @@ function BracketMatch({
                   ? "Completed"
                   : "Cancelled"}
       </p>
+
+      {g.guestMatch && !g.isBye && g.status !== "cancelled" && (
+        <p className="mt-1 text-[11px] text-mist">Guest match · no Friends League points</p>
+      )}
 
       {g.resultStatus === "reported" && (
         <p className="mt-2 rounded-lg bg-[#ff9d3d]/10 px-2.5 py-1.5 text-[11px] text-[#ffc98f]">

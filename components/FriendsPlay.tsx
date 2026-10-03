@@ -1,196 +1,263 @@
-"use client";
-
 import Link from "next/link";
 import { Reveal } from "./Reveal";
 
+const VIOLET = "#a78bfa";
+const PINK = "#ec4899";
+
 const STEPS = [
   {
-    n: "01",
+    n: "1",
     title: "Pick your format",
-    body: "1v1 singles or 2v2 doubles — 8-Ball on our 9-foot tables. The app tells you exactly how many players you need.",
+    body: "1v1 singles or 2v2 doubles, 8-Ball on our 9ft tables. The app tells you exactly how many players you need.",
+    diagram: <FormatDiagram />,
   },
   {
-    n: "02",
+    n: "2",
     title: "Add your friends",
-    body: "Search registered players, invite them, and they accept from their own account. Not registered yet? They can sign up in a minute.",
+    body: "Search registered players and invite them. They accept from their own account. Not registered? Add them to a tournament as a guest by name.",
+    diagram: <InviteDiagram />,
   },
   {
-    n: "03",
+    n: "3",
     title: "The bracket builds itself",
-    body: "4, 8 or 16 entrants — odd numbers get automatic BYEs. Report results and winners advance live on every phone.",
+    body: "Any number from 3 to 32 entries. Uneven numbers get automatic BYEs. Report results and winners advance live on every phone.",
+    diagram: <BracketDiagram />,
   },
-] as const;
+];
 
 const PERKS = [
   "Private to the friends you add",
-  "Live updates — no refreshing",
+  "Live updates, no refreshing",
   "Friends League points on your profile",
 ] as const;
 
 export function FriendsPlay() {
   return (
-    <section id="friends" className="relative isolate overflow-hidden py-20 sm:py-28 md:py-32">
-      <div className="pointer-events-none absolute -left-32 top-10 -z-10 h-[420px] w-[420px] rounded-full bg-[#a78bfa]/15 blur-[130px]" />
-      <div className="pointer-events-none absolute -right-24 bottom-0 -z-10 h-[380px] w-[380px] rounded-full bg-[#ec4899]/12 blur-[130px]" />
+    <section id="friends" className="py-20 sm:py-28">
+      <div className="px-5 md:px-8 lg:px-12">
+        <Reveal>
+          <span className="text-xs font-medium uppercase tracking-[0.32em] text-[#c4b5fd]">
+            New · Friends tournaments
+          </span>
+          <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-12">
+            <h2 className="font-display text-3xl font-bold leading-[1.05] text-white sm:text-4xl md:text-5xl xl:whitespace-nowrap">
+              Create your own tournament{" "}
+              <span className="text-[#c4b5fd]">with friends</span>
+            </h2>
+            <p className="max-w-md text-[15px] leading-relaxed text-mist lg:pb-1 lg:text-right">
+              Set up a 1v1 or 2v2 game or a full knockout, add your friends and
+              play it out on one table. Book a second if the group needs it.
+            </p>
+          </div>
+        </Reveal>
 
-      <div className="mx-auto max-w-6xl px-5 md:px-8">
-        <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr]">
-          <div>
-            <Reveal>
-              <span className="inline-flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.34em] text-[#c4b5fd]">
-                <span className="h-px w-8 bg-[#a78bfa]/50" />
-                New · Friends Tournaments
-              </span>
-              <h2 className="mt-5 font-display text-4xl font-bold uppercase leading-[1.02] tracking-tight text-white md:text-[3.5rem]">
-                Create your own tournament{" "}
-                <span className="bg-[linear-gradient(120deg,#a78bfa,#ec4899)] bg-clip-text text-transparent">
-                  with friends
+        <ol className="mt-12 grid gap-x-4 gap-y-10 md:grid-cols-3">
+          {STEPS.map((s, i) => (
+            <Reveal key={s.n} as="li" delay={0.07 * i}>
+              <div className="flex h-56 items-center justify-center rounded-lg bg-navy-900 p-5 sm:h-64">
+                {s.diagram}
+              </div>
+              <div className="mt-5 flex gap-4">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#a78bfa] font-display text-sm font-bold text-navy-950">
+                  {s.n}
                 </span>
-              </h2>
-              <p className="mt-5 max-w-xl text-mist">
-                Turn a night at Cue Point into a proper competition. Set up a 1v1 or 2v2 game or a full
-                knockout tournament, add your friends, and play it out on one table — or book a second one
-                if the group needs it.
-              </p>
-            </Reveal>
-
-            <ol className="mt-8 space-y-5">
-              {STEPS.map((s, i) => (
-                <Reveal key={s.n} delay={0.06 * i}>
-                  <li className="flex gap-4">
-                    <span className="font-mono text-xs text-[#c4b5fd]">{s.n}</span>
-                    <div>
-                      <p className="font-display text-lg font-semibold text-white">{s.title}</p>
-                      <p className="mt-1 text-sm leading-relaxed text-mist">{s.body}</p>
-                    </div>
-                  </li>
-                </Reveal>
-              ))}
-            </ol>
-
-            <Reveal delay={0.2}>
-              <ul className="mt-7 flex flex-wrap gap-2">
-                {PERKS.map((p) => (
-                  <li
-                    key={p}
-                    className="rounded-full border border-[#a78bfa]/30 bg-[#a78bfa]/[0.07] px-3.5 py-1.5 text-xs text-[#ddd6fe]"
-                  >
-                    {p}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-8 flex flex-wrap items-center gap-4">
-                <Link
-                  href="/play/new-tournament"
-                  data-cursor="hot"
-                  className="btn-friends inline-flex items-center gap-2 px-7 py-3.5 text-sm md:text-[15px]"
-                >
-                  <span aria-hidden>🎱</span>
-                  Create a Friends Tournament
-                </Link>
-                <Link
-                  href="/play/new-game"
-                  className="text-sm font-medium text-[#c4b5fd] underline-offset-4 hover:underline"
-                >
-                  or just start a game →
-                </Link>
+                <div>
+                  <h3 className="font-display text-xl font-bold leading-tight text-white lg:text-2xl">
+                    {s.title}
+                  </h3>
+                  <p className="mt-2 text-[15px] leading-relaxed text-white/85">{s.body}</p>
+                </div>
               </div>
             </Reveal>
-          </div>
+          ))}
+        </ol>
 
-          <Reveal delay={0.1}>
-            <BracketArt />
-          </Reveal>
+        <div className="mt-14 flex flex-col gap-6 border-t border-white/10 pt-8 lg:flex-row lg:items-center lg:justify-between">
+          <ul className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-x-8">
+            {PERKS.map((p) => (
+              <li key={p} className="flex items-center gap-2 text-[15px] text-white/85">
+                <Check />
+                {p}
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center gap-5">
+            <Link
+              href="/play/new-tournament"
+              data-cursor="hot"
+              className="inline-flex items-center rounded-full bg-[#a78bfa] px-7 py-3.5 text-[12px] font-bold uppercase tracking-[0.08em] text-navy-950 transition-colors duration-200 hover:bg-white"
+            >
+              Create a Friends Tournament
+            </Link>
+            <Link
+              href="/play/new-game"
+              className="text-sm font-medium text-[#c4b5fd] underline underline-offset-4 hover:text-white"
+            >
+              or just start a game
+            </Link>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-/** a small, static picture of a live 2v2 bracket — decoration only */
-function BracketArt() {
+function Check() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke={VIOLET} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </svg>
+  );
+}
+
+/* ----- step 1 : 1v1 vs 2v2 ------------------------------------- */
+
+function Player({ color }: { color: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className="h-9 w-9" fill={color} aria-hidden>
+      <circle cx="12" cy="8" r="4.2" />
+      <path d="M3.5 21a8.5 8.5 0 0 1 17 0z" />
+    </svg>
+  );
+}
+
+function FormatDiagram() {
+  const side = (count: number, color: string) => (
+    <div className="flex">
+      {Array.from({ length: count }, (_, i) => (
+        <Player key={i} color={color} />
+      ))}
+    </div>
+  );
+  const option = (label: string, perSide: number, note: string) => (
+    <div className="flex flex-1 flex-col items-center rounded-md border border-white/15 px-2 py-4">
+      <span className="font-display text-lg font-bold text-white">{label}</span>
+      <div className="mt-3 flex items-center gap-2">
+        {side(perSide, VIOLET)}
+        <span className="text-[11px] font-bold uppercase text-mist">vs</span>
+        {side(perSide, PINK)}
+      </div>
+      <span className="mt-3 text-xs text-mist">{note}</span>
+    </div>
+  );
   return (
     <div
-      aria-hidden
-      className="relative rounded-[28px] border border-white/10 bg-[linear-gradient(160deg,rgba(167,139,250,0.10),rgba(5,16,28,0.6))] p-5 shadow-[0_40px_100px_-40px_rgba(167,139,250,0.5)] sm:p-7"
+      role="img"
+      aria-label="Two formats: 1v1 with two players, or 2v2 with four players"
+      className="flex w-full max-w-sm gap-3"
     >
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.25em] text-[#c4b5fd]">2v2 · 8-Ball</p>
-          <p className="font-display text-lg font-semibold text-white">Friday Night Cup</p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-mist">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a78bfa] opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-[#a78bfa]" />
-          </span>
-          Live
-        </span>
-      </div>
-
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <div className="space-y-4">
-          <Match a="John & Mike" b="Sam & Alex" winner="a" />
-          <Match a="David & Zed" b="BYE" winner="a" bye />
-        </div>
-        <div className="flex flex-col items-center text-[#a78bfa]/60">
-          <span className="h-16 w-px bg-current" />
-          <span className="my-1 text-[10px] uppercase tracking-widest">semi</span>
-          <span className="h-16 w-px bg-current" />
-        </div>
-        <div>
-          <Match a="John & Mike" b="David & Zed" highlight />
-        </div>
-      </div>
-
-      <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-        {[
-          ["Teams", "3/4"],
-          ["Players", "6/8"],
-          ["Status", "In play"],
-        ].map(([k, v]) => (
-          <div key={k} className="rounded-xl bg-white/[0.04] py-2">
-            <p className="font-display text-base font-semibold text-white">{v}</p>
-            <p className="text-[10px] uppercase tracking-wider text-mist">{k}</p>
-          </div>
-        ))}
-      </div>
+      {option("1v1", 1, "2 players")}
+      {option("2v2", 2, "4 players")}
     </div>
   );
 }
 
-function Match({
-  a,
-  b,
-  winner,
-  bye,
-  highlight,
-}: {
-  a: string;
-  b: string;
-  winner?: "a" | "b";
-  bye?: boolean;
-  highlight?: boolean;
-}) {
-  const row = (name: string, won: boolean, isBye?: boolean) => (
-    <div
-      className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-xs ${
-        won ? "bg-[#a78bfa]/20 font-semibold text-white" : "text-mist"
-      } ${isBye ? "italic" : ""}`}
-    >
-      <span className="truncate">{name}</span>
-      {won && <span>✓</span>}
-    </div>
-  );
+/* ----- step 2 : invite → accept -------------------------------- */
+
+function InviteDiagram() {
+  const friends = [
+    { name: "Friend 1", accepted: true },
+    { name: "Friend 2", accepted: true },
+    { name: "Friend 3", accepted: false },
+  ];
   return (
     <div
-      className={`rounded-xl border p-1.5 ${
-        highlight ? "border-[#ec4899]/50 bg-[#ec4899]/[0.06]" : "border-white/10 bg-white/[0.03]"
-      }`}
+      role="img"
+      aria-label="You send invites; each friend accepts from their own account"
+      className="flex w-full max-w-sm items-center gap-3"
     >
-      {row(a, winner === "a")}
-      {row(b, winner === "b", bye)}
-      {bye && <p className="px-2.5 pb-1 pt-0.5 text-[10px] text-[#c4b5fd]">BYE — advances automatically</p>}
+      <div className="flex flex-col items-center">
+        <Player color={VIOLET} />
+        <span className="mt-1 text-xs font-semibold text-white">You</span>
+      </div>
+
+      <div className="flex flex-1 flex-col items-center">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-mist">Invite</span>
+        <svg viewBox="0 0 80 12" className="mt-1 h-3 w-full" fill="none" stroke={VIOLET} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" preserveAspectRatio="none" aria-hidden>
+          <path d="M2 6h74" />
+          <path d="M70 1.5 76 6l-6 4.5" vectorEffect="non-scaling-stroke" />
+        </svg>
+      </div>
+
+      <ul className="w-[55%] space-y-2">
+        {friends.map((f) => (
+          <li
+            key={f.name}
+            className="flex items-center justify-between rounded-md border border-white/15 px-3 py-2 text-xs"
+          >
+            <span className="font-medium text-white">{f.name}</span>
+            {f.accepted ? (
+              <span className="flex items-center gap-1 font-semibold text-[#c4b5fd]">
+                <Check />
+                Accepted
+              </span>
+            ) : (
+              <span className="text-mist">Pending</span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
+  );
+}
+
+/* ----- step 3 : bracket with a BYE ----------------------------- */
+
+function BracketDiagram() {
+  const box = (x: number, y: number, label: string, tone: "plain" | "win" | "bye" | "final" = "plain") => (
+    <g key={`${x}-${y}`}>
+      <rect
+        x={x}
+        y={y}
+        width={84}
+        height={26}
+        rx={4}
+        fill={tone === "win" ? "rgba(167,139,250,0.22)" : tone === "final" ? "rgba(236,72,153,0.18)" : "none"}
+        stroke={tone === "final" ? PINK : tone === "win" ? VIOLET : "rgba(255,255,255,0.22)"}
+        strokeDasharray={tone === "bye" ? "4 3" : undefined}
+      />
+      <text
+        x={x + 42}
+        y={y + 17}
+        textAnchor="middle"
+        fontSize="11"
+        fontWeight={tone === "plain" || tone === "bye" ? 500 : 700}
+        fill={tone === "bye" ? "rgba(233,244,248,0.6)" : "#fff"}
+      >
+        {label}
+      </text>
+    </g>
+  );
+  return (
+    <svg
+      viewBox="0 0 320 196"
+      className="h-full w-full max-w-sm"
+      role="img"
+      aria-label="Example bracket: three teams and a BYE, winners advance to the final"
+    >
+      {[
+        [50, "Round 1"],
+        [160, "Final"],
+        [270, "Winner"],
+      ].map(([x, t]) => (
+        <text key={t} x={x} y={12} textAnchor="middle" fontSize="9" fontWeight={700} letterSpacing="1" fill="rgba(233,244,248,0.6)">
+          {String(t).toUpperCase()}
+        </text>
+      ))}
+
+      <g fill="none" stroke="rgba(167,139,250,0.7)" strokeWidth="1.5">
+        <path d="M92 37h13v36H92M105 55h13" />
+        <path d="M92 127h13v36H92M105 145h13" />
+        <path d="M202 55h13v90h-13M215 100h13" />
+      </g>
+
+      {box(8, 24, "Team A", "win")}
+      {box(8, 60, "Team B")}
+      {box(8, 114, "Team C", "win")}
+      {box(8, 150, "BYE", "bye")}
+      {box(118, 42, "Team A", "win")}
+      {box(118, 132, "Team C")}
+      {box(228, 87, "Team A", "final")}
+    </svg>
   );
 }

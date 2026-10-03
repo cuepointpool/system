@@ -126,7 +126,7 @@ export function PlayerLine({
   right,
   you,
 }: {
-  player: PlayerRef;
+  player: PlayerRef & { guest?: boolean };
   status?: MemberView["status"];
   right?: React.ReactNode;
   you?: boolean;
@@ -138,7 +138,13 @@ export function PlayerLine({
         {player.nickname}
         {you && <span className="ml-1.5 text-[11px] text-mist">(you)</span>}
       </span>
-      {status && <MemberBadge status={status} />}
+      {player.guest ? (
+        <span className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mist">
+          Guest
+        </span>
+      ) : (
+        status && <MemberBadge status={status} />
+      )}
       {right}
     </div>
   );

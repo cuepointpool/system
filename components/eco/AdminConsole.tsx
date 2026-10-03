@@ -45,6 +45,7 @@ type Tab =
   | "tables"
   | "bookings"
   | "finance"
+  | "campaign"
   | "audit";
 
 type VenueTable = {
@@ -160,7 +161,10 @@ export function AdminConsole() {
             { value: "tables", label: "Tables" },
             { value: "bookings", label: "Bookings" },
             ...(me?.role === "admin"
-              ? [{ value: "finance", label: "Finance" }]
+              ? [
+                  { value: "finance", label: "Finance" },
+                  { value: "campaign", label: "Campaign" },
+                ]
               : []),
             { value: "audit", label: "Audit" },
           ]}
@@ -171,10 +175,10 @@ export function AdminConsole() {
 
       <div className="mt-8">
         {tab === "matches" && <MatchTab headers={headers} />}
-        {tab === "players" && <PlayersTab headers={headers} />}
+        {tab === "players" && <PlayersTab headers={headers} isAdmin={me?.role === "admin"} />}
         {tab === "tournaments" && <TournamentsTab headers={headers} />}
         {tab === "promotions" && <PromotionsTab headers={headers} />}
-        {tab === "membership" && <MembershipTab headers={headers} />}
+        {tab === "membership" && <MembershipTab headers={headers} isAdmin={me?.role === "admin"} />}
         {tab === "tables" && <TablesTab headers={headers} />}
         {tab === "bookings" && <BookingsTab headers={headers} />}
         {tab === "finance" &&
@@ -183,9 +187,110 @@ export function AdminConsole() {
           ) : (
             <p className="text-sm text-mist">Finance is admin-only.</p>
           ))}
+        {tab === "campaign" && me?.role === "admin" && <CampaignCodeTab />}
         {tab === "audit" && <AuditTab headers={headers} />}
       </div>
     </div>
+  );
+}
+
+/* ================= Campaign pass code (admins) ================= */
+
+function CampaignCodeTab() {
+  const [isSet, setIsSet] = useState<boolean | null>(null);
+  const [code, setCode] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/staff/campaign-code", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setIsSet(!!d.set))
+      .catch(() => setIsSet(null));
+  }, []);
+
+  async function save(next: string) {
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch("/api/staff/campaign-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: next }),
+    });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return setMsg({ ok: false, text: d.error || "Could not save" });
+    setIsSet(!!d.set);
+    setCode("");
+    setAgain("");
+    setMsg({ ok: true, text: d.set ? "Pass code saved." : "Pass code removed." });
+  }
+
+  const valid = /^\d{4,8}$/.test(code) && code === again;
+
+  return (
+    <Panel title="Campaign pass code">
+      <p className="mb-4 max-w-xl text-[13px] leading-relaxed text-mist">
+        Players can&rsquo;t record their own Campaign Mode results. After you watch a
+        player finish, they hand you their phone and you enter this code to approve
+        it. The code is yours alone; approvals are logged under your name. Don&rsquo;t
+        use your login password.
+      </p>
+      <p className="mb-4 text-sm text-white">
+        Status:{" "}
+        <span className={isSet ? "font-semibold text-teal" : "font-semibold text-[#ffc98f]"}>
+          {isSet == null ? "…" : isSet ? "You have a pass code set" : "No pass code set yet"}
+        </span>
+      </p>
+      <Msg msg={msg} />
+      <div className="mt-3 grid max-w-md gap-3 sm:grid-cols-2">
+        <Field label={isSet ? "New pass code (4 to 8 digits)" : "Pass code (4 to 8 digits)"}>
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="new-password"
+            className="input"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+          />
+        </Field>
+        <Field label="Type it again">
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="new-password"
+            className="input"
+            value={again}
+            onChange={(e) => setAgain(e.target.value.replace(/\D/g, "").slice(0, 8))}
+          />
+        </Field>
+      </div>
+      {code.length > 0 && again.length > 0 && code !== again && (
+        <p className="mt-2 text-xs text-rose-200">The two codes don&rsquo;t match.</p>
+      )}
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button
+          onClick={() => save(code)}
+          disabled={busy || !valid}
+          className="btn-primary px-5 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isSet ? "Change pass code" : "Set pass code"}
+        </button>
+        {isSet && (
+          <button
+            onClick={() => {
+              if (window.confirm("Remove your pass code? You won't be able to approve campaign results until you set a new one."))
+                void save("");
+            }}
+            disabled={busy}
+            className="btn-ghost px-5 py-2.5 text-sm"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </Panel>
   );
 }
 
@@ -602,7 +707,13 @@ function ScoreStepper({
 
 /* ================= Players ================= */
 
-function PlayersTab({ headers }: { headers: Record<string, string> }) {
+function PlayersTab({
+  headers,
+  isAdmin,
+}: {
+  headers: Record<string, string>;
+  isAdmin: boolean;
+}) {
   const { data: players, reload } = useStaffData(
     "/api/staff/players",
     headers,
@@ -707,6 +818,8 @@ function PlayersTab({ headers }: { headers: Record<string, string> }) {
             <Field label="Membership">
               <select
                 className="input"
+                disabled={!isAdmin}
+                title={isAdmin ? undefined : "Only an admin can set a paid membership"}
                 value={form.membershipTier}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, membershipTier: e.target.value }))
@@ -774,6 +887,8 @@ function PlayersTab({ headers }: { headers: Record<string, string> }) {
                 </select>
                 <select
                   value={p.membershipTier}
+                  disabled={!isAdmin}
+                  title={isAdmin ? undefined : "Only an admin can change membership"}
                   onChange={(e) =>
                     patch(p.id, { membershipTier: e.target.value })
                   }
@@ -787,6 +902,8 @@ function PlayersTab({ headers }: { headers: Record<string, string> }) {
                 </select>
                 <select
                   value={p.role}
+                  disabled={!isAdmin}
+                  title={isAdmin ? undefined : "Only an admin can change roles"}
                   onChange={(e) => patch(p.id, { role: e.target.value })}
                   className="input !py-1.5 text-xs"
                 >
@@ -1304,7 +1421,13 @@ function PromotionsTab({ headers }: { headers: Record<string, string> }) {
 
 /* ================= Membership plans ================= */
 
-function MembershipTab({ headers }: { headers: Record<string, string> }) {
+function MembershipTab({
+  headers,
+  isAdmin,
+}: {
+  headers: Record<string, string>;
+  isAdmin: boolean;
+}) {
   const { data, reload } = useStaffData(
     "/api/staff/memberships",
     headers,
@@ -1319,7 +1442,15 @@ function MembershipTab({ headers }: { headers: Record<string, string> }) {
         <code className="mx-1 text-teal">scripts/setup.ts</code>.
       </p>
       <Msg msg={msg} />
-      <div className="mt-3 grid gap-4 sm:grid-cols-3">
+      {!isAdmin && (
+        <p className="mb-3 text-[12px] text-[#ffc98f]">
+          View only. Membership plans and players&rsquo; memberships can be changed by an admin.
+        </p>
+      )}
+      <div
+        className={`mt-3 grid gap-4 sm:grid-cols-3 ${isAdmin ? "" : "pointer-events-none opacity-60"}`}
+        aria-disabled={!isAdmin}
+      >
         {(data ?? []).map((plan) => (
           <PlanEditor
             key={plan.id}
@@ -1332,7 +1463,13 @@ function MembershipTab({ headers }: { headers: Record<string, string> }) {
               setMsg(
                 res.ok
                   ? { ok: true, text: `${plan.name} updated` }
-                  : { ok: false, text: "Update failed" },
+                  : {
+                      ok: false,
+                      text:
+                        res.status === 403
+                          ? "Only an admin can change membership plans."
+                          : "Update failed",
+                    },
               );
               reload();
             }}

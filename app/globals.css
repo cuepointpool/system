@@ -59,17 +59,13 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Ambient page backdrop — layered radial lighting over deep navy */
+/* Page backdrop — flat deep navy */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -2;
-  background:
-    radial-gradient(60% 45% at 12% 6%, rgba(0, 194, 168, 0.16), transparent 60%),
-    radial-gradient(55% 40% at 92% 24%, rgba(12, 74, 110, 0.28), transparent 55%),
-    radial-gradient(70% 60% at 50% 110%, rgba(0, 194, 168, 0.12), transparent 60%),
-    linear-gradient(180deg, #05101c 0%, #071626 45%, #05101c 100%);
+  background: #05101c;
 }
 
 /* Fine grain to kill banding on gradients */

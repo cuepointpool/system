@@ -10,7 +10,7 @@ export const SITE = {
     process.env.NEXT_PUBLIC_SITE_URL ||
     "https://d2tisxlomg8f7u.cloudfront.net",
   description:
-    "Cue Point is a premium pool parlour in Pitipana, Homagama — tournament-grade tables, a neon-lit lounge, and an effortless online booking system.",
+    "Cue Point is a pool parlour in Pitipana, Homagama with three full-size 9ft tables, player rankings, tournaments and online table booking.",
   address: {
     line1: "Pitipana",
     line2: "Homagama",
@@ -110,13 +110,6 @@ export const ACCOUNT_NAV: NavChild[] = [
   { label: "Rewards", href: "/dashboard#loyalty" },
 ];
 
-export const STATS = [
-  { value: 3, suffix: "", label: "Tables on the floor" },
-  { value: 5, suffix: "+", label: "Years in the game" },
-  { value: 40, suffix: "+", label: "Tournaments hosted" },
-  { value: 8000, suffix: "+", label: "Frames racked" },
-] as const;
-
 /** Flat hourly rate — every table, standard floor or VIP booth.
  *  The floor tables themselves live in the DB (`venue_tables`, seeded by
  *  scripts/setup.ts) and are managed from the admin console. */
@@ -128,56 +121,40 @@ export const TABLE_HALF_HOUR_RATE = 500;
 
 export const FEATURES = [
   {
-    n: "01",
-    title: "Premium Tables",
-    body: "9ft match tables with Simonis-grade cloth, tournament balls and levelled slate beds. Re-clothed every quarter.",
-    icon: "diamond",
-    image: "/media/feature-tables.png",
-    alt: "9ft match table racked under low light at Cue Point",
+    title: "Proper 9ft Tables",
+    body: "Three full-size 9ft tables, one of them in a private booth. Every table plays the same and costs the same.",
+    image: "/media/story/why-tables.jpg",
+    alt: "A 9ft pool table under a hanging lamp",
+    focus: "50% 60%",
+    href: "/#boards",
+    cta: "See the tables",
   },
   {
-    n: "02",
-    title: "Competitive Play",
-    body: "Weekly ladders, handicap leagues and monthly cash tournaments with a live bracket board and ranked profiles.",
-    icon: "trophy",
-    image: "/media/feature-compete.png",
-    alt: "Player breaking a rack beside the Cue Point live bracket screen",
+    title: "Real Competition",
+    body: "Ranked matches count toward a public leaderboard and your player profile. House tournaments run on a live bracket.",
+    image: "/media/story/why-compete.jpg",
+    alt: "A player down on a shot",
+    focus: "50% 50%",
+    href: "/rankings",
+    cta: "See the rankings",
   },
   {
-    n: "03",
-    title: "Friends & Hangouts",
-    body: "Private booths, a full espresso & mocktail bar and a sound system tuned low enough to still call your shots.",
-    icon: "people",
-    image: "/media/feature-social.png",
-    alt: "Leather booth and cocktail bar in the Cue Point lounge",
+    title: "Nights With Friends",
+    body: "Bring your own crowd, set up games or a full tournament between yourselves and settle it on the table.",
+    image: "/media/story/why-friends.jpg",
+    alt: "A group of friends around a pool table",
+    focus: "45% 50%",
+    href: "/play",
+    cta: "Play with friends",
   },
   {
-    n: "04",
-    title: "Fun & Entertainment",
-    body: "Trick-shot nights, coaching clinics with certified refs, and a rookie corner so first-timers never feel lost.",
-    icon: "bolt",
-    image: "/media/feature-fun.png",
-    alt: "Eight ball and cue on a Cue Point table",
+    title: "Campaign Mode",
+    body: "100 missions to work through on your phone, from your first clean break to full table control.",
+    image: "/media/story/why-campaign.jpg",
+    alt: "Hands racking the balls for a new frame",
+    focus: "60% 50%",
+    href: "/campaign",
+    cta: "Start the campaign",
   },
 ] as const;
 
-export const TESTIMONIALS = [
-  {
-    quote:
-      "The cloth runs true and the lighting is flawless. It's the only room in Homagama I'll play a money frame in.",
-    name: "Dinuka R.",
-    role: "League regular",
-  },
-  {
-    quote:
-      "Booked a booth for eight, walked in, table was racked and waiting. The whole night just flowed.",
-    name: "Sahan & crew",
-    role: "Friday hangout",
-  },
-  {
-    quote:
-      "Started as a total beginner at the rookie corner. Three months later I'm in the Tuesday ladder. Class staff.",
-    name: "Ishara P.",
-    role: "Rookie ladder",
-  },
-] as const;

@@ -25,7 +25,7 @@ export function MissionBottomSheet({
 }: {
   mission: MissionView | null;
   onClose: () => void;
-  onObjectives: (m: MissionView, next: number) => void;
+  onObjectives: (m: MissionView, next: number, code: string) => Promise<string | null>;
   busy: boolean;
 }) {
   // lock the page behind the sheet while it's open
@@ -64,7 +64,13 @@ export function MissionBottomSheet({
             onClick={(e) => e.stopPropagation()}
             className="absolute inset-x-0 bottom-0 flex max-h-[92vh] flex-col rounded-t-3xl border-t border-white/12 bg-navy-950 lg:mx-auto lg:max-w-lg lg:rounded-b-3xl"
           >
-            <SheetBody mission={mission} onObjectives={onObjectives} busy={busy} />
+            {/* re-keyed on saved progress so the draft resets to what the server holds */}
+            <SheetBody
+              key={`${mission.id}:${mission.objectivesDone}`}
+              mission={mission}
+              onObjectives={onObjectives}
+              busy={busy}
+            />
           </motion.div>
         </motion.div>
       )}
@@ -78,7 +84,7 @@ function SheetBody({
   busy,
 }: {
   mission: MissionView;
-  onObjectives: (m: MissionView, next: number) => void;
+  onObjectives: (m: MissionView, next: number, code: string) => Promise<string | null>;
   busy: boolean;
 }) {
   const [started, setStarted] = useState(mission.objectivesDone > 0);
@@ -86,6 +92,22 @@ function SheetBody({
   const done = mission.objectivesDone;
   const complete = mission.state === "completed";
   const tracking = started || done > 0 || complete;
+
+  // Players only DRAFT their ticks. Nothing is saved until an admin who
+  // watched the game approves it with their pass code.
+  const [draft, setDraft] = useState(done);
+  const [asking, setAsking] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const changed = draft !== done;
+
+  async function approve() {
+    setError(null);
+    const err = await onObjectives(mission, draft, code);
+    setCode("");
+    if (err) setError(err);
+    else setAsking(false);
+  }
 
   return (
     <>
@@ -143,22 +165,24 @@ function SheetBody({
             </h3>
             <span className="text-[12px] text-mist">
               <span className="font-bold text-teal">
-                {done} / {total}
+                {draft} / {total}
               </span>{" "}
-              Completed
+              {changed ? "Ticked" : "Completed"}
             </span>
           </div>
           <ObjectiveList
             objectives={mission.objectives}
-            done={done}
-            disabled={busy || !tracking}
-            onChange={tracking ? (next) => onObjectives(mission, next) : undefined}
+            done={draft}
+            disabled={busy || !tracking || asking}
+            onChange={tracking ? setDraft : undefined}
           />
-          {!tracking && (
-            <p className="mt-2.5 text-center text-[11px] text-mist/60">
-              Start the mission to tick objectives off as you play.
-            </p>
-          )}
+          <p className="mt-2.5 text-center text-[11px] text-mist/70">
+            {!tracking
+              ? "Start the mission to tick objectives off as you play."
+              : changed
+                ? "Not saved yet. An admin has to approve it with their pass code."
+                : "Play this mission with an admin watching. They approve your result."}
+          </p>
         </section>
 
         {/* rewards */}
@@ -184,7 +208,60 @@ function SheetBody({
       {/* sticky action */}
       <div className="border-t border-white/10 bg-navy-950/95 px-4 pb-safe pt-3">
         <div className="pb-3">
-          {complete ? (
+          {asking ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void approve();
+              }}
+            >
+              <p className="text-[13px] font-bold text-white">Hand the phone to an admin</p>
+              <p className="mt-0.5 text-[12px] leading-snug text-mist">
+                Admin: you watched this game. Enter your pass code to approve{" "}
+                <span className="font-bold text-white">
+                  {draft} of {total}
+                </span>{" "}
+                objectives{draft >= total ? " and complete the mission" : ""}.
+              </p>
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                autoFocus
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                placeholder="Admin pass code"
+                aria-label="Admin pass code"
+                className="mt-3 h-[52px] w-full rounded-xl border border-white/20 bg-navy-900 px-4 text-center font-display text-xl tracking-[0.4em] text-white placeholder:text-[13px] placeholder:tracking-normal placeholder:text-mist/60 focus:border-teal focus:outline-none"
+              />
+              {error && (
+                <p role="alert" className="mt-2 text-[12px] font-medium text-red-300">
+                  {error}
+                </p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAsking(false);
+                    setCode("");
+                    setError(null);
+                  }}
+                  disabled={busy}
+                  className="min-h-[52px] flex-1 rounded-full border border-white/25 text-[14px] font-bold uppercase tracking-wide text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={busy || code.length < 4}
+                  className="min-h-[52px] flex-[2] rounded-full bg-teal text-[14px] font-bold uppercase tracking-wide text-navy-950 disabled:opacity-50"
+                >
+                  {busy ? "Checking…" : "Approve"}
+                </button>
+              </div>
+            </form>
+          ) : complete && !changed ? (
             <div className="flex min-h-[52px] items-center justify-center gap-2 rounded-full border border-teal/40 bg-teal/10 text-[14px] font-bold uppercase tracking-wide text-teal">
               Mission complete
               <Stars earned={mission.stars} size="h-4 w-4" />
@@ -200,16 +277,14 @@ function SheetBody({
             </button>
           ) : (
             <button
-              onClick={() => onObjectives(mission, total)}
-              disabled={busy || done >= total}
+              onClick={() => (changed ? setAsking(true) : setDraft(total))}
+              disabled={busy}
               className={cn(
-                "flex min-h-[52px] w-full items-center justify-center rounded-full text-[15px] font-bold uppercase tracking-wide transition-transform active:scale-[0.98]",
-                done >= total
-                  ? "bg-teal/20 text-teal"
-                  : "bg-teal text-navy-950 disabled:opacity-60",
+                "flex min-h-[52px] w-full items-center justify-center rounded-full text-[15px] font-bold uppercase tracking-wide transition-transform active:scale-[0.98] disabled:opacity-60",
+                changed ? "bg-gold text-navy-950" : "bg-teal text-navy-950",
               )}
             >
-              {busy ? "Saving…" : `Complete mission (${done}/${total})`}
+              {changed ? `Get admin approval (${draft}/${total})` : "Tick all objectives"}
             </button>
           )}
         </div>

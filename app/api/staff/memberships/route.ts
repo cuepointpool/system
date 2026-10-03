@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { staffActor } from "@/lib/ecosystem/identity";
+import { adminActor, staffActor } from "@/lib/ecosystem/identity";
 import {
   getMembershipPlans,
   getRewards,
@@ -19,8 +19,13 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const actor = await staffActor(req);
-  if (!actor) return NextResponse.json({ error: "Staff only" }, { status: 401 });
+  // plans set what members pay and earn — admins only, not staff
+  const actor = await adminActor(req);
+  if (!actor)
+    return NextResponse.json(
+      { error: "Only an admin can change membership plans." },
+      { status: 403 },
+    );
   const body = await req.json().catch(() => ({}));
   if (!body.id) return NextResponse.json({ error: "Missing plan id" }, { status: 422 });
   const plan = await updateMembershipPlan(

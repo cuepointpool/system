@@ -24,10 +24,16 @@ export async function POST(
         await F.cancelTournament(id, actor);
         break;
       case "add-team":
-        await F.addTeam(id, actor, strList(b.playerIds));
+        await F.addTeam(id, actor, strList(b.playerIds), strList(b.guests));
         break;
       case "add-member":
         await F.addTeamMember(id, actor, str(b.teamId), str(b.playerId));
+        break;
+      case "add-guest":
+        await F.addTeamGuest(id, actor, str(b.teamId), str(b.name));
+        break;
+      case "remove-guest":
+        await F.removeTournamentGuest(id, actor, str(b.guestId));
         break;
       case "remove-team":
         await F.removeTeam(id, actor, str(b.teamId));

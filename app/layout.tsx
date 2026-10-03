@@ -43,13 +43,13 @@ export const metadata: Metadata = {
     siteName: `${SITE.name} Pool Parlour`,
     type: "website",
     locale: "en_LK",
-    images: [{ url: "/media/cover.png", width: 2031, height: 774, alt: SITE.name }],
+    images: [{ url: "/media/og-logo.png", width: 1200, height: 630, alt: `${SITE.name} Pool Parlour` }],
   },
   twitter: {
     card: "summary_large_image",
     title: `${SITE.name} — Book a Pool Table in Homagama`,
     description: SITE.description,
-    images: ["/media/cover.png"],
+    images: ["/media/og-logo.png"],
   },
   icons: {
     icon: [{ url: "/media/logo-mark.png" }],
