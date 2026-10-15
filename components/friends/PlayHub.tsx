@@ -10,7 +10,7 @@ import type {
   NotificationItem,
   TournamentListItem,
 } from "@/lib/friends/types";
-import { apiGet, apiPost } from "./api";
+import { apiDelete, apiGet, apiPost } from "./api";
 import { FriendsLeagueCard } from "./FriendsLeagueCard";
 import { useLive, useRequestGuard } from "./live";
 import { Card, GhostButton, Notice, PrimaryButton, StatusPill } from "./ui";
@@ -58,8 +58,29 @@ export function PlayHub({ initial, initialTab }: { initial: MyPlay; initialTab: 
     setBusyId(null);
   }
 
-  async function markAllRead() {
-    await apiPost("/api/friends/notifications", {});
+  // Opening the list = reading it: everything is marked read straight away
+  // (the ones that were new stay highlighted while you're looking at them).
+  const [wasNew, setWasNew] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (tab !== "notifications" || !notes || notes.unread === 0) return;
+    const fresh = notes.items.filter((n) => !n.read).map((n) => n.id);
+    const t = setTimeout(() => {
+      setWasNew((cur) => new Set([...cur, ...fresh]));
+      void apiPost("/api/friends/notifications", {}).then(() => refetch());
+    }, 0);
+    return () => clearTimeout(t);
+  }, [tab, notes, refetch]);
+
+  async function removeNote(id: string) {
+    setNotes((cur) => (cur ? { ...cur, items: cur.items.filter((n) => n.id !== id) } : cur));
+    await apiDelete("/api/friends/notifications", { ids: [id] });
+    await refetch();
+  }
+
+  async function clearAll() {
+    if (!window.confirm("Remove all notifications?")) return;
+    setNotes((cur) => (cur ? { unread: 0, items: [] } : cur));
+    await apiDelete("/api/friends/notifications", {});
     await refetch();
   }
 
@@ -143,10 +164,12 @@ export function PlayHub({ initial, initialTab }: { initial: MyPlay; initialTab: 
 
           {tab === "notifications" && (
             <>
-              {(notes?.items.length ?? 0) > 0 && unread > 0 && (
-                <button onClick={markAllRead} className="text-xs text-[#c4b5fd] underline-offset-2 hover:underline">
-                  Mark all as read
-                </button>
+              {(notes?.items.length ?? 0) > 0 && (
+                <div className="flex justify-end">
+                  <button onClick={clearAll} className="rounded-full border border-white/15 px-4 py-2 text-sm text-mist hover:text-white">
+                    Clear all
+                  </button>
+                </div>
               )}
               {!notes || notes.items.length === 0 ? (
                 <p className="rounded-2xl border border-white/10 p-6 text-center text-sm text-mist">
@@ -154,23 +177,40 @@ export function PlayHub({ initial, initialTab }: { initial: MyPlay; initialTab: 
                 </p>
               ) : (
                 notes.items.map((n) => {
-                  const body = (
+                  const isNew = !n.read || wasNew.has(n.id);
+                  const text = (
+                    <>
+                      <p className="text-sm text-white">
+                        {isNew && <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-[#ec4899] align-middle" aria-label="new" />}
+                        {n.message}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-mist">{timeAgo(n.createdAt)}</p>
+                    </>
+                  );
+                  return (
                     <div
+                      key={n.id}
                       className={cn(
-                        "rounded-xl border px-4 py-3",
-                        n.read ? "border-white/10 bg-white/[0.02]" : "border-[#a78bfa]/40 bg-[#a78bfa]/[0.07]",
+                        "flex items-start gap-2 rounded-xl border px-4 py-3",
+                        isNew ? "border-[#a78bfa]/40 bg-[#a78bfa]/[0.07]" : "border-white/10 bg-white/[0.02]",
                       )}
                     >
-                      <p className="text-sm text-white">{n.message}</p>
-                      <p className="mt-0.5 text-[11px] text-mist">{timeAgo(n.createdAt)}</p>
+                      {n.href ? (
+                        <Link href={n.href} className="min-w-0 flex-1">
+                          {text}
+                        </Link>
+                      ) : (
+                        <div className="min-w-0 flex-1">{text}</div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeNote(n.id)}
+                        aria-label="Remove this notification"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-mist hover:bg-white/10 hover:text-white"
+                      >
+                        ✕
+                      </button>
                     </div>
-                  );
-                  return n.href ? (
-                    <Link key={n.id} href={n.href} className="block">
-                      {body}
-                    </Link>
-                  ) : (
-                    <div key={n.id}>{body}</div>
                   );
                 })
               )}

@@ -101,6 +101,9 @@ export interface GameView {
   reportedScoreB: number | null;
   /** the table a running match is on, if someone said */
   tableName: string | null;
+  /** final rounds of a Groups tournament: who will fill an empty slot ("Group A winner") */
+  sourceA: string | null;
+  sourceB: string | null;
   isBye: boolean;
   /** a guest is playing on either side, so no Friends League points are awarded */
   guestMatch: boolean;

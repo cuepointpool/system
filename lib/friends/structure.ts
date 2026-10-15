@@ -108,14 +108,18 @@ export function normalizeSettings(raw: unknown): TournamentSettings {
   // continued whenever they like. No schedule is imposed any more; old
   // weekly settings simply play on without play-by dates.
   const schedule = "session" as const;
+  const kind = pick(r.kind, ["knockout", "double_elim", "league", "groups"] as const, d.kind);
   return {
-    kind: pick(r.kind, ["knockout", "double_elim", "league", "groups"] as const, d.kind),
+    kind,
     legs: r.legs === 2 || r.legs === "2" ? 2 : 1,
     finish: pick(r.finish, ["table", "final", "top4", "top8"] as const, d.finish),
     groups: int(r.groups, 2, LIMITS.maxGroups, d.groups),
     advance: int(r.advance, 1, 4, d.advance),
-    groupFinish: pick(r.groupFinish, ["knockout", "none"] as const, d.groupFinish),
-    thirdPlace: r.thirdPlace === undefined ? d.thirdPlace : r.thirdPlace === true,
+    // Groups always end with an overall 1st, 2nd and 3rd: the best go on to
+    // a final and a 3rd-place match (the old "each group has its own winner"
+    // is no longer offered).
+    groupFinish: "knockout",
+    thirdPlace: kind === "groups" ? true : r.thirdPlace === undefined ? d.thirdPlace : r.thirdPlace === true,
     tiebreak: pick(r.tiebreak, ["decider", "h2h"] as const, d.tiebreak),
     schedule,
     startDate: null,
@@ -138,8 +142,10 @@ export function validateSettings(s: TournamentSettings, n: number): string | nul
     if (n < s.groups * LIMITS.minGroupSize)
       return `${s.groups} groups need at least ${s.groups * LIMITS.minGroupSize} entries (${LIMITS.minGroupSize} per group).`;
     const smallest = Math.floor(n / s.groups);
-    if (s.groupFinish === "knockout" && s.advance >= smallest)
+    if (s.advance >= smallest)
       return `With ${smallest} in the smallest group, at most ${smallest - 1} can go through from each group.`;
+    if (s.groups * s.advance < 4)
+      return `At least 4 need to go through (for a final and a 3rd-place match) — let ${Math.ceil(4 / s.groups)} go through from each group.`;
   }
   const total = describe(s, n).totalMatches;
   if (total > LIMITS.maxMatches)
@@ -384,7 +390,7 @@ export function cutsFor(s: TournamentSettings, tableSize: number): number[] {
   let cuts: number[];
   if (s.kind === "league") {
     cuts =
-      s.finish === "table" ? [1]
+      s.finish === "table" ? [1, 2, 3]
       : s.finish === "final" ? (s.thirdPlace ? [2, 4] : [2])
       : s.finish === "top4" ? [4]
       : [8];

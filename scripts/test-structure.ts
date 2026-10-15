@@ -206,7 +206,7 @@ t("head-to-head option separates a two-way tie without a decider", () => {
 
 t("cuts follow the finish", () => {
   assert.deepEqual(cutsFor(normalizeSettings({ kind: "league", finish: "final" }), 8), [2, 4]);
-  assert.deepEqual(cutsFor(normalizeSettings({ kind: "league", finish: "table" }), 8), [1]);
+  assert.deepEqual(cutsFor(normalizeSettings({ kind: "league", finish: "table" }), 8), [1, 2, 3]);
   assert.deepEqual(cutsFor(normalizeSettings({ kind: "groups", advance: 2 }), 4), [2]);
   assert.deepEqual(cutsFor(normalizeSettings({ kind: "knockout" }), 8), []);
 });
@@ -236,6 +236,17 @@ t("planMain covers every kind and describe() counts the same matches", () => {
   }
   assert.equal(describe(normalizeSettings({ kind: "league", finish: "final" }), 8).totalMatches, 28 + 2);
   assert.equal(describe(normalizeSettings({ kind: "double_elim" }), 8).totalMatches, 14);
+});
+
+t("groups always end with an overall 1st, 2nd and 3rd", () => {
+  const s = normalizeSettings({ kind: "groups", groupFinish: "none", thirdPlace: false });
+  assert.equal(s.groupFinish, "knockout");
+  assert.equal(s.thirdPlace, true);
+  const plan = planPlayoffs(s, [[1, 2, 3], [4, 5, 6]]);
+  assert.ok(plan.some((g) => g.label === "Final"));
+  assert.ok(plan.some((g) => g.stage === "third_place"));
+  assert.match(validateSettings(normalizeSettings({ kind: "groups", groups: 3, advance: 1 }), 9)!, /At least 4 need to go through/);
+  assert.equal(validateSettings(normalizeSettings({ kind: "groups", groups: 4, advance: 1 }), 12), null);
 });
 
 t("best-of scores: the winner reaches exactly half-plus-one", () => {

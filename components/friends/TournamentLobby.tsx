@@ -56,6 +56,11 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
       .catch(() => {});
   }, []);
 
+  // being on this page means you've seen its news — clear those from the bell
+  useEffect(() => {
+    void apiPost("/api/friends/notifications", { href: `/play/tournaments/${t.id}` });
+  }, [t.id, t.version]);
+
   async function act(action: string, body: Record<string, unknown> = {}) {
     setBusy(true);
     setError(null);
@@ -568,7 +573,7 @@ function StandingsTab({ t, meId, onDone }: { t: TournamentView; meId: string; on
         <div className="hide-scrollbar flex gap-4 overflow-x-auto pb-3">
           {current.rounds.map((r) => (
             <div key={r.round} className="flex w-64 shrink-0 flex-col">
-              <p className="mb-3 text-sm font-semibold text-white">{r.name}</p>
+              <RoundHeading name={r.name} className="mb-3 text-sm" />
               <div className="flex flex-1 flex-col justify-around gap-3">
                 {r.games.map((g) => (
                   <MatchCard key={g.id} g={g} meId={meId} ppt={t.playersPerTeam} onDone={onDone} compact />
@@ -691,7 +696,12 @@ function AllMatches({ t, meId, onDone }: { t: TournamentView; meId: string; onDo
           <div className="space-y-5">
             {s.rounds.map((r) => (
               <div key={r.round}>
-                {r.name && <p className="mb-2 text-sm font-semibold text-mist">{r.name}</p>}
+                {r.name &&
+                  (tierOfRound(r.name) ? (
+                    <RoundHeading name={r.name} className="mb-2 text-sm" />
+                  ) : (
+                    <p className="mb-2 text-sm font-semibold text-mist">{r.name}</p>
+                  ))}
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {r.games.map((g) => (
                     <MatchCard key={g.id} g={g} meId={meId} ppt={t.playersPerTeam} onDone={onDone} />
@@ -906,6 +916,109 @@ function sectionGames(sec: TournamentSection): GameView[] {
   return sec.kind === "list" ? sec.games : sec.rounds.flatMap((r) => r.games);
 }
 
+/* Knockout rounds get grander towards the end:
+   last 16 (blue) → quarter finals (teal) → semi finals (silver) →
+   final (gold); the 3rd-place match is bronze. */
+type Tier = "final" | "third" | "semi" | "quarter" | "r16";
+
+/** which tier a round name belongs to ("Semi Finals", "Upper final", …) */
+function tierOfRound(name: string | null | undefined): Tier | null {
+  switch (name) {
+    case "Final":
+    case "Grand final":
+      return "final";
+    case "3rd place":
+      return "third";
+    case "Semi Finals":
+    case "Upper final":
+    case "Lower final":
+      return "semi";
+    case "Quarter Finals":
+    case "Upper semi finals":
+      return "quarter";
+    case "Round of 16":
+    case "Upper quarter finals":
+      return "r16";
+    default:
+      return null;
+  }
+}
+
+function tierOf(g: GameView): Tier | null {
+  if (g.stage === "third_place") return "third";
+  if (g.stage === "grand_final") return "final";
+  if (g.stage === "knockout" || g.stage === "playoff" || g.stage === "upper" || g.stage === "lower")
+    return tierOfRound(g.roundName);
+  return null;
+}
+
+const TIER = {
+  final: {
+    icon: "🏆",
+    heading: "text-gold",
+    card: "border-2 border-gold/70 bg-[linear-gradient(160deg,rgba(244,196,48,0.16),rgba(244,196,48,0.03))] shadow-[0_0_40px_-12px_rgba(244,196,48,0.55)]",
+    banner: "bg-gold/20 text-gold",
+    label: "FINAL · for 1st place",
+    winner: "Champion",
+    winnerRow: "bg-gold/20 text-white",
+  },
+  third: {
+    icon: "🥉",
+    heading: "text-[#e3a06b]",
+    card: "border-2 border-[#cd7f32]/70 bg-[linear-gradient(160deg,rgba(205,127,50,0.16),rgba(205,127,50,0.03))]",
+    banner: "bg-[#cd7f32]/25 text-[#e3a06b]",
+    label: "3rd place match",
+    winner: "3rd place",
+    winnerRow: "bg-[#cd7f32]/20 text-white",
+  },
+  semi: {
+    icon: "🥈",
+    heading: "text-[#dfe5ec]",
+    card: "border-2 border-[#c9d1dc]/60 bg-[linear-gradient(160deg,rgba(201,209,220,0.14),rgba(201,209,220,0.02))]",
+    banner: "bg-[#c9d1dc]/20 text-[#e8edf3]",
+    label: "SEMI FINAL · win to reach the final",
+    winner: "Into the final",
+    winnerRow: "bg-[#c9d1dc]/15 text-white",
+  },
+  quarter: {
+    icon: "⭐",
+    heading: "text-teal",
+    card: "border-2 border-teal/50 bg-[linear-gradient(160deg,rgba(0,194,168,0.12),rgba(0,194,168,0.02))]",
+    banner: "bg-teal/15 text-teal",
+    label: "QUARTER FINAL · win to reach the semis",
+    winner: "Into the semis",
+    winnerRow: "bg-teal/15 text-white",
+  },
+  r16: {
+    icon: "🎱",
+    heading: "text-sky-300",
+    card: "border border-sky-400/40 bg-sky-400/[0.04]",
+    banner: "bg-sky-400/15 text-sky-300",
+    label: "ROUND OF 16 · win to reach the quarter finals",
+    winner: "Through",
+    winnerRow: "bg-sky-400/15 text-white",
+  },
+} as const;
+
+/** a round's own banner text (double-elimination rounds say where they lead) */
+function bannerText(g: GameView, tier: Tier): string {
+  if (g.stage === "grand_final") return "GRAND FINAL · for 1st place";
+  if (g.roundName === "Upper final") return "UPPER FINAL · win to reach the grand final";
+  if (g.roundName === "Lower final") return "LOWER FINAL · win to reach the grand final";
+  return TIER[tier].label;
+}
+
+/** heading for a bracket column / a round in the match list */
+function RoundHeading({ name, className }: { name: string; className?: string }) {
+  const tier = tierOfRound(name);
+  return (
+    <p className={cn("font-bold uppercase tracking-wide", tier ? TIER[tier].heading : "text-white", className)}>
+      {tier ? `${TIER[tier].icon} ` : ""}
+      {name}
+    </p>
+  );
+}
+
 function teamLabel(team: TeamView | null, ppt: number): string {
   if (!team) return "TBD";
   return ppt > 1 ? `Team ${team.name}` : team.name;
@@ -964,15 +1077,29 @@ function MatchCard({
               ? { text: "Cancelled", cls: "bg-white/10 text-mist" }
               : { text: "Waiting", cls: "bg-white/5 text-mist" };
 
+  const tier = tierOf(g);
+  const look = tier ? TIER[tier] : null;
+
   return (
     <div
       className={cn(
         "rounded-2xl border p-4",
-        g.status === "in_progress" ? "border-teal/40 bg-teal/[0.04]" : g.status === "ready" ? "border-[#a78bfa]/40 bg-[#a78bfa]/[0.04]" : "border-white/10 bg-white/[0.025]",
-        big && "border-0 bg-transparent p-0",
+        look
+          ? look.card
+          : g.status === "in_progress"
+            ? "border-teal/40 bg-teal/[0.04]"
+            : g.status === "ready"
+              ? "border-[#a78bfa]/40 bg-[#a78bfa]/[0.04]"
+              : "border-white/10 bg-white/[0.025]",
+        big && !look && "border-0 bg-transparent p-0",
         compact && "p-3",
       )}
     >
+      {look && (
+        <p className={cn("-mx-1 mb-3 rounded-lg px-3 py-1.5 text-center text-xs font-bold uppercase tracking-[0.18em]", look.banner)}>
+          {look.icon} {bannerText(g, tier!)}
+        </p>
+      )}
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="truncate text-xs text-mist">
           {g.roundName}
@@ -990,18 +1117,36 @@ function MatchCard({
             className={cn(
               "flex items-center justify-between gap-2 rounded-xl px-3",
               big ? "py-2.5 text-lg" : compact ? "py-1.5 text-sm" : "py-2 text-base",
-              won ? "bg-[#a78bfa]/15 font-semibold text-white" : lost ? "text-mist" : "text-white",
+              won ? cn("font-semibold", look ? look.winnerRow : "bg-[#a78bfa]/15 text-white") : lost ? "text-mist" : "text-white",
             )}
           >
             <span className="truncate">
-              {team ? teamLabel(team, ppt) : g.isBye ? "—" : "To be decided"}
+              {team ? (
+                teamLabel(team, ppt)
+              ) : g.isBye ? (
+                "—"
+              ) : (i === 0 ? g.sourceA : g.sourceB) ? (
+                <span className="text-mist">{i === 0 ? g.sourceA : g.sourceB}</span>
+              ) : (
+                "To be decided"
+              )}
               {mine(team) && <span className="ml-1.5 text-xs text-[#c4b5fd]">(you)</span>}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
               {g.status === "completed" && !g.isBye && g.bestOf > 1 && (
                 <span className="font-display tabular-nums">{i === 0 ? g.scoreA : g.scoreB}</span>
               )}
-              {won && <span aria-hidden>🏆</span>}
+              {won && look && (!compact || tier === "final" || tier === "third") && (
+                <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", look.banner)}>
+                  {look.winner}
+                </span>
+              )}
+              {won &&
+                (tier === "final" || tier === "third" ? (
+                  <span aria-hidden>{look!.icon}</span>
+                ) : (
+                  <span className="text-sm font-bold text-teal" aria-label="won">✓</span>
+                ))}
             </span>
           </div>
         );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn, timeAgo } from "@/lib/utils";
@@ -20,6 +20,11 @@ export function GameLobby({ initial, meId }: { initial: GameView; meId: string }
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // being on this page means you've seen its news — clear those from the bell
+  useEffect(() => {
+    void apiPost("/api/friends/notifications", { href: `/play/games/${g.id}` });
+  }, [g.id, g.version]);
 
   async function act(action: string, body: Record<string, unknown> = {}) {
     setBusy(true);

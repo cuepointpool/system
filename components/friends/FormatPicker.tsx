@@ -27,7 +27,7 @@ import {
 const KINDS: { kind: TournamentKind; title: string; line: string; icon: string }[] = [
   { kind: "knockout", title: "Knockout", line: "Lose a match and you're out. Quick and simple.", icon: "⚔️" },
   { kind: "league", title: "League", line: "Everyone plays everyone. Most wins takes it.", icon: "📋" },
-  { kind: "groups", title: "Groups", line: "Small leagues first, then the best play a knockout.", icon: "🗂️" },
+  { kind: "groups", title: "Groups", line: "Small leagues first, then the best play for 1st, 2nd and 3rd.", icon: "🗂️" },
   { kind: "double_elim", title: "Two lives", line: "You're only out after losing twice.", icon: "🔁" },
 ];
 
@@ -66,10 +66,8 @@ export function FormatPicker({
   const problem = validateSettings(s, entries);
   const summary = describe(s, entries);
   const table = s.kind === "league" || s.kind === "groups";
-  const hasThird =
-    s.kind === "knockout" ||
-    (s.kind === "league" && s.finish !== "table") ||
-    (s.kind === "groups" && s.groupFinish === "knockout");
+  // groups always play a 3rd-place match, so there's nothing to choose
+  const hasThird = s.kind === "knockout" || (s.kind === "league" && s.finish !== "table");
   const recommended = recommendedKind(entries);
 
   return (
@@ -138,27 +136,15 @@ export function FormatPicker({
               suffix={`about ${Math.floor(entries / s.groups) || "?"} ${noun}s in each`}
             />
           </Question>
-          <Question label="After the groups">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <BigChoice
-                on={s.groupFinish === "knockout"}
-                onClick={() => set({ groupFinish: "knockout" })}
-                title="The best play a knockout"
-                line="One overall winner."
-              />
-              <BigChoice
-                on={s.groupFinish === "none"}
-                onClick={() => set({ groupFinish: "none" })}
-                title="Each group has its own winner"
-                line="No knockout."
-              />
-            </div>
-          </Question>
-          {s.groupFinish === "knockout" && (
+          <p className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-mist">
+            After the groups, the best play on: <span className="text-white">semi finals → a final for 1st and 2nd</span>, and a{" "}
+            <span className="text-white">3rd-place match</span>. Every tournament ends with a winner, a runner-up and a 3rd place.
+          </p>
+          {(
             <Question label="How many go through from each group?">
               <Stepper
                 value={s.advance}
-                min={1}
+                min={Math.min(Math.ceil(4 / s.groups), Math.max(1, smallestGroup - 1))}
                 max={Math.max(1, Math.min(4, smallestGroup - 1))}
                 onChange={(advance) => set({ advance })}
                 suffix={`${s.groups * s.advance} ${noun}s in the knockout`}
@@ -185,15 +171,28 @@ export function FormatPicker({
         {more && (
           <div className="space-y-5 border-t border-white/10 px-4 py-4">
             {table && (
-              <Question label="Play each other">
-                <Chips
-                  value={String(s.legs)}
-                  onChange={(v) => set({ legs: v === "2" ? 2 : 1 })}
-                  options={[
-                    ["1", "Once"],
-                    ["2", "Twice"],
-                  ]}
-                />
+              <Question label={`How many times does each ${noun} play each other?`}>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {([1, 2] as const).map((legs) => {
+                    const total = describe({ ...s, legs }, entries).stages[0]?.matches ?? 0;
+                    return (
+                      <BigChoice
+                        key={legs}
+                        on={s.legs === legs}
+                        onClick={() => set({ legs })}
+                        title={legs === 1 ? "Once" : "Twice"}
+                        line={
+                          legs === 1
+                            ? `Every ${noun} meets every other ${noun} one time — ${total} ${s.kind === "groups" ? "group" : "league"} matches.`
+                            : `Every pair meets two times — ${total} matches. Fairer, but takes twice as long.`
+                        }
+                      />
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-xs text-mist">
+                  Only the {s.kind === "groups" ? "group" : "league"} matches. Finals and tie-breakers are always played once.
+                </p>
               </Question>
             )}
             {hasThird && (
@@ -209,17 +208,26 @@ export function FormatPicker({
               </Question>
             )}
             {table && (
-              <Question label="Level on points?">
-                <Chips
-                  value={s.tiebreak}
-                  onChange={(tiebreak) => set({ tiebreak })}
-                  options={[
-                    ["decider", "Play a tie-breaker"],
-                    ["h2h", "Who won between them, then a tie-breaker"],
-                  ]}
-                />
+              <Question label="If two finish on the same points, how is it decided?">
+                <p className="mb-2 text-xs text-mist">
+                  Only when it matters — who wins, who makes the final, who goes through.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <BigChoice
+                    on={s.tiebreak === "decider"}
+                    onClick={() => set({ tiebreak: "decider" })}
+                    title="They play an extra match"
+                    line="Always a tie-breaker match. Three or more level? Each plays the others once."
+                  />
+                  <BigChoice
+                    on={s.tiebreak === "h2h"}
+                    onClick={() => set({ tiebreak: "h2h" })}
+                    title="Whoever won their match goes through"
+                    line="If they already played and one won, no extra match. Otherwise they play one."
+                  />
+                </div>
                 <p className="mt-1.5 text-xs text-mist">
-                  Level players always settle it by playing — never a coin toss.
+                  Always settled by playing — never a coin toss or anyone choosing.
                 </p>
               </Question>
             )}
@@ -271,8 +279,7 @@ function optionsLine(s: TournamentSettings): string {
 export function formatLine(s: TournamentSettings): string {
   const parts: string[] = [s.kind === "double_elim" ? "Two lives" : KIND_LABEL[s.kind]];
   if (s.kind === "league") parts.push(FINISH_LABEL[s.finish]);
-  if (s.kind === "groups")
-    parts.push(`${s.groups} groups`, s.groupFinish === "knockout" ? `top ${s.advance} to knockout` : "group winners");
+  if (s.kind === "groups") parts.push(`${s.groups} groups`, `top ${s.advance} of each to the final rounds`);
   if ((s.kind === "league" || s.kind === "groups") && s.legs === 2) parts.push("play each other twice");
   if (s.thirdPlace && (s.kind === "knockout" || (s.kind === "league" && s.finish !== "table") || (s.kind === "groups" && s.groupFinish === "knockout")))
     parts.push("3rd-place match");

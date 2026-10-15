@@ -41,3 +41,10 @@ export const apiPost = <T = Record<string, unknown>>(path: string, body: unknown
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
+export const apiDelete = <T = Record<string, unknown>>(path: string, body: unknown = {}) =>
+  call<T>(path, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });

@@ -636,3 +636,8 @@ ALTER TABLE tournaments ALTER COLUMN registration_deadline DROP NOT NULL;
 
 
 ALTER TABLE friend_games ADD COLUMN IF NOT EXISTS table_name TEXT;
+
+-- ------------------------------------------ group → knockout slot sources ---
+ALTER TABLE friend_games
+  ADD COLUMN IF NOT EXISTS a_source TEXT,
+  ADD COLUMN IF NOT EXISTS b_source TEXT;

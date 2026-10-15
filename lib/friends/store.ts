@@ -169,6 +169,18 @@ interface GameRow {
   reported_score_a: number | null;
   reported_score_b: number | null;
   table_name: string | null;
+  /** final rounds of a Groups tournament: "2:1" = Group B winner, fills when that group is done */
+  a_source: string | null;
+  b_source: string | null;
+}
+
+/** "2:1" → "Group B winner", "1:2" → "Group A runner-up", "3:3" → "Group C 3rd" */
+function sourceLabel(token: string | null): string | null {
+  if (!token) return null;
+  const [g, p] = token.split(":").map(Number);
+  if (!g || !p) return null;
+  const place = p === 1 ? "winner" : p === 2 ? "runner-up" : p === 3 ? "3rd" : `${p}th`;
+  return `${groupName(g)} ${place}`;
 }
 
 type Score = { a: number; b: number };
@@ -528,6 +540,8 @@ async function gameViews(
       reportedScoreA: g.reported_score_a,
       reportedScoreB: g.reported_score_b,
       tableName: g.table_name,
+      sourceA: g.team_a_id ? null : sourceLabel(g.a_source),
+      sourceB: g.team_b_id ? null : sourceLabel(g.b_source),
       isBye: g.is_bye,
       guestMatch: !!teamA?.hasGuest || !!teamB?.hasGuest,
       version: g.version,
@@ -617,7 +631,8 @@ export async function getTournamentView(
   if (t.kind === "league" || t.kind === "groups") {
     for (const tb of tables) {
       const rows = of(t.kind === "league" ? "league" : "group").filter((g) => g.group_no === tb.group);
-      const finished = t.status === "completed" || (rows.length > 0 && !rows.some(live) && t.phase !== "main");
+      const playoffsOpen = gameRows.some((g) => g.stage === "decider" && g.group_no === tb.group && live(g));
+      const finished = t.status === "completed" || (rows.length > 0 && !rows.some(live) && !playoffsOpen);
       const settled = finished && !blockingTies(tb.rows, tb.cuts, tb.group).length;
       const through = qualifyCount(s, tb.rows.length);
       sections.push({
@@ -633,7 +648,7 @@ export async function getTournamentView(
         rounds: roundsOf(rows),
       });
     }
-    bracket("playoffs", t.kind === "league" ? "Playoffs" : "Knockout", of("playoff"), of("third_place"));
+    bracket("playoffs", t.kind === "league" ? "Playoffs" : "Final rounds", of("playoff"), of("third_place"));
   }
   const deciders = of("decider");
   if (deciders.length)
@@ -646,8 +661,14 @@ export async function getTournamentView(
 
   // ---- ties the tournament is waiting on ----
   const pendingTies: PendingTie[] =
-    t.status === "in_progress" && t.phase === "tiebreak"
+    t.status === "in_progress"
       ? tables
+          // a table's ties only count once its own matches are all played
+          .filter((tb) =>
+            !gameRows.some(
+              (g) => (g.stage === "league" || g.stage === "group") && g.group_no === tb.group && live(g),
+            ),
+          )
           .flatMap((tb) => blockingTies(tb.rows, tb.cuts, tb.group))
           .map((tie) => {
             const among = deciders.filter(
@@ -1044,6 +1065,11 @@ export async function listNotifications(
   playerId: string,
   limit = 30,
 ): Promise<{ unread: number; items: NotificationItem[] }> {
+  // old news tidies itself away
+  await pooled(
+    `DELETE FROM friend_notifications WHERE player_id = $1 AND created_at < now() - interval '30 days'`,
+    [playerId],
+  );
   const rows = await pooled<{
     id: string;
     kind: string;
@@ -1069,15 +1095,33 @@ export async function listNotifications(
   };
 }
 
-export async function markNotificationsRead(playerId: string, ids?: string[]) {
+/**
+ * Mark notifications read: the given ids, everything about one page (`href` —
+ * opening a tournament or game counts as having seen its news), or all.
+ */
+export async function markNotificationsRead(playerId: string, ids?: string[], href?: string) {
   await transaction(async (c) => {
-    await c.query(
+    const { rowCount } = await c.query(
       `UPDATE friend_notifications SET read_at = now()
         WHERE player_id = $1 AND read_at IS NULL
-          AND ($2::text[] IS NULL OR id = ANY($2))`,
+          AND ($2::text[] IS NULL OR id = ANY($2))
+          AND ($3::text IS NULL OR href = $3)`,
+      [playerId, ids && ids.length ? ids : null, href || null],
+    );
+    if (!rowCount) return;
+    // other tabs / devices refresh their badge
+    await c.query("SELECT pg_notify($1, $2)", [CHANNEL, JSON.stringify({ t: [`user:${playerId}`] })]);
+  });
+}
+
+/** remove notifications for good: the given ids, or all of them */
+export async function clearNotifications(playerId: string, ids?: string[]) {
+  await transaction(async (c) => {
+    await c.query(
+      `DELETE FROM friend_notifications
+        WHERE player_id = $1 AND ($2::text[] IS NULL OR id = ANY($2))`,
       [playerId, ids && ids.length ? ids : null],
     );
-    // other tabs / devices refresh their badge
     await c.query("SELECT pg_notify($1, $2)", [CHANNEL, JSON.stringify({ t: [`user:${playerId}`] })]);
   });
 }
@@ -1870,7 +1914,43 @@ async function correctResult(
 
   // a table result after the table was settled: rewind the second stage
   const tableMatch = g.stage === "league" || g.stage === "group";
-  if (tableMatch && t.phase !== "main") {
+  const builtFinals = t.kind === "groups" && all.some((x) => x.a_source || x.b_source);
+  if (builtFinals && (g.stage === "group" || g.stage === "decider")) {
+    // this group's players may already be sitting in the final rounds
+    const prefix = `${g.group_no}:`;
+    const fromHere = (x: GameRow, slot: "a" | "b") =>
+      !!(slot === "a" ? x.a_source : x.b_source)?.startsWith(prefix) && !!(slot === "a" ? x.team_a_id : x.team_b_id);
+    const fed = all.filter((x) => fromHere(x, "a") || fromHere(x, "b"));
+    const playedFinal = fed.find((x) => x.status === "completed");
+    if (playedFinal)
+      throw new FriendsError(
+        409,
+        `${where(playedFinal)} has already been played with ${groupName(g.group_no ?? 1)}'s results. Undo that match first.`,
+      );
+    const laterPlayoffs = all.filter(
+      (x) =>
+        x.stage === "decider" &&
+        x.group_no === g.group_no &&
+        x.id !== g.id &&
+        (g.stage === "group" || (x.round ?? 0) > (g.round ?? 0)),
+    );
+    if (laterPlayoffs.some((x) => x.status === "completed"))
+      throw new FriendsError(409, "A tie-breaker in this group has already been played. Undo it first.");
+    if (laterPlayoffs.length)
+      await c.query(`DELETE FROM friend_games WHERE id = ANY($1)`, [laterPlayoffs.map((x) => x.id)]);
+    for (const x of fed)
+      for (const slot of ["a", "b"] as const)
+        if (fromHere(x, slot))
+          await c.query(
+            `UPDATE friend_games SET ${slot === "a" ? "team_a_id" : "team_b_id"} = NULL,
+                    status = 'waiting_for_players', started_at = NULL, table_name = NULL,
+                    result_status = 'none', reported_winner_team_id = NULL, reported_by = NULL,
+                    reported_score_a = NULL, reported_score_b = NULL, version = version + 1
+              WHERE id = $1`,
+            [x.id],
+          );
+  }
+  if (tableMatch && t.phase !== "main" && !builtFinals) {
     const later = all.filter((x) => ["playoff", "third_place", "decider"].includes(x.stage));
     const played = later.find((x) => x.status === "completed" && !x.is_bye);
     if (played)
@@ -2125,6 +2205,8 @@ async function progress(c: PoolClient, t: TournamentRow, batch: Batch) {
   ).rows;
   const open = (g: GameRow) =>
     g.status === "waiting_for_players" || g.status === "ready" || g.status === "in_progress";
+  if (t.kind === "groups" && games.some((g) => g.a_source || g.b_source))
+    return progressGroups(c, t, games, batch);
   if (games.some(open)) return;
 
   const s = settingsOf(t);
@@ -2139,45 +2221,7 @@ async function progress(c: PoolClient, t: TournamentRow, batch: Batch) {
 
     if (ties.length) {
       await c.query(`UPDATE friend_tournaments SET phase = 'tiebreak' WHERE id = $1`, [t.id]);
-      let round =
-        Math.max(0, ...games.filter((g) => g.stage === "decider").map((g) => g.round ?? 0)) + 1;
-      // Level players settle it at the table: a play-off where each plays each
-      // other once (two players = one rematch). If they come out level again,
-      // the next progress() call simply creates another play-off round.
-      const tieBestOf = bestOfFor(s, { stage: "decider", label: "Tie-breaker" });
-      for (const tie of ties) {
-        const names: string[] = [];
-        for (const x of tie.teamIds) names.push(await teamName(c, x));
-        const thisRound = round++;
-        const pairs: [string, string][] = [];
-        for (let i = 0; i < tie.teamIds.length; i++)
-          for (let j = i + 1; j < tie.teamIds.length; j++) pairs.push([tie.teamIds[i], tie.teamIds[j]]);
-        for (const [position, [a, b]] of pairs.entries()) {
-          await c.query(
-            `INSERT INTO friend_games
-               (id, name, organizer_id, format, players_per_team, status, tournament_id, round,
-                position, team_a_id, team_b_id, stage, group_no, label, best_of)
-             VALUES ($1,$2,$3,$4,$5,'ready',$6,$7,$8,$9,$10,'decider',$11,'Tie-breaker',$12)`,
-            [nid("fg"), `${t.name} — Tie-breaker`, t.organizer_id, t.format, t.players_per_team,
-             t.id, thisRound, position, a, b, tie.group, tieBestOf],
-          );
-        }
-        const again = games.some(
-          (g) => g.stage === "decider" && tie.teamIds.includes(g.team_a_id ?? "") && tie.teamIds.includes(g.team_b_id ?? ""),
-        );
-        const how =
-          pairs.length === 1
-            ? "A rematch decides it"
-            : `Play-off: each of you plays the others once (${pairs.length} matches)`;
-        for (const x of tie.teamIds)
-          for (const pid of await teamPlayerIds(c, x))
-            await batch.notify(
-              pid,
-              "match_ready",
-              `${names.join(", ")} ${again ? "are still level" : "finished level on points"} in ${t.name}. ${how} — play your tie-breaker${pairs.length > 1 ? "s" : ""}.`,
-              href,
-            );
-      }
+      await createPlayoffMatches(c, t, games, ties, batch);
       return;
     }
 
@@ -2196,8 +2240,8 @@ async function progress(c: PoolClient, t: TournamentRow, batch: Batch) {
           pid,
           "playoffs_set",
           inIt
-            ? `You made the ${t.kind === "league" ? "playoffs" : "knockout"} in ${t.name}! Your next match is ready.`
-            : `The ${t.kind === "league" ? "playoffs" : "knockout"} in ${t.name} are set.`,
+            ? `You made the ${t.kind === "league" ? "playoffs" : "final rounds"} in ${t.name}! Your next match is ready.`
+            : `The ${t.kind === "league" ? "playoffs" : "final rounds"} in ${t.name} are set.`,
           href,
         );
       }
@@ -2205,6 +2249,169 @@ async function progress(c: PoolClient, t: TournamentRow, batch: Batch) {
     }
   }
   await completeTournament(c, t, games, batch);
+}
+
+/**
+ * Groups whose final rounds were built at the start: each group moves on by
+ * itself. As soon as a group's matches are all played, its ties are played
+ * off and its qualifiers drop into their final-round slots — no waiting for
+ * the other groups. A final-round match is ready the moment both players
+ * are known.
+ */
+async function progressGroups(c: PoolClient, t: TournamentRow, games: GameRow[], batch: Batch) {
+  const open = (g: GameRow) =>
+    g.status === "waiting_for_players" || g.status === "ready" || g.status === "in_progress";
+  const s = settingsOf(t);
+  const href = tournamentPath(t.id);
+  const teams = await inTx(c)<{ id: string; seed: number | null }>(
+    `SELECT id, seed FROM friend_teams WHERE tournament_id = $1 ORDER BY created_at, id`,
+    [t.id],
+  );
+  const tables = buildTables(t, seedOrderOf(teams), games);
+  const live: TournamentRow = { ...t, status: "in_progress" };
+  for (const tb of tables) {
+    const g = tb.group;
+    if (games.some((x) => (x.stage === "group" || x.stage === "decider") && x.group_no === g && open(x))) continue;
+    const ties = blockingTies(tb.rows, tb.cuts, g);
+    if (ties.length) {
+      await createPlayoffMatches(c, t, games, ties, batch);
+      continue;
+    }
+    for (let place = 1; place <= s.advance; place++) {
+      const team = tb.rows[place - 1]?.teamId;
+      if (!team) continue;
+      const token = `${g}:${place}`;
+      for (const k of games.filter((x) => x.stage !== "group" && x.stage !== "decider")) {
+        for (const slot of ["a", "b"] as const) {
+          const src = slot === "a" ? k.a_source : k.b_source;
+          const filled = slot === "a" ? k.team_a_id : k.team_b_id;
+          if (src !== token || filled) continue;
+          await fillSlot(c, batch, k.id, slot, team, live);
+          if (slot === "a") k.team_a_id = team;
+          else k.team_b_id = team;
+          for (const pid of await teamPlayerIds(c, team))
+            await batch.notify(
+              pid,
+              "playoffs_set",
+              `You finished ${place === 1 ? "1st" : place === 2 ? "2nd" : `${place}th`} in ${groupName(g ?? 1)} and go through to the final rounds of ${t.name}!`,
+              href,
+            );
+        }
+      }
+    }
+  }
+  const [{ n }] = await inTx(c)<{ n: number }>(
+    `SELECT count(*)::int AS n FROM friend_games
+      WHERE tournament_id = $1 AND status IN ('waiting_for_players','ready','in_progress')`,
+    [t.id],
+  );
+  if (n === 0) {
+    const fresh = (await c.query<GameRow>(`SELECT * FROM friend_games WHERE tournament_id = $1`, [t.id])).rows;
+    await completeTournament(c, t, fresh, batch);
+  }
+}
+
+/**
+ * Level players settle it at the table: a play-off where each plays each
+ * other once (two players = one rematch). If they come out level again, the
+ * next progress() simply creates another round.
+ */
+async function createPlayoffMatches(
+  c: PoolClient,
+  t: TournamentRow,
+  games: GameRow[],
+  ties: BlockingTie[],
+  batch: Batch,
+) {
+  const s = settingsOf(t);
+  const href = tournamentPath(t.id);
+  let round =
+    Math.max(0, ...games.filter((g) => g.stage === "decider").map((g) => g.round ?? 0)) + 1;
+  const tieBestOf = bestOfFor(s, { stage: "decider", label: "Tie-breaker" });
+  for (const tie of ties) {
+    const names: string[] = [];
+    for (const x of tie.teamIds) names.push(await teamName(c, x));
+    const thisRound = round++;
+    const pairs: [string, string][] = [];
+    for (let i = 0; i < tie.teamIds.length; i++)
+      for (let j = i + 1; j < tie.teamIds.length; j++) pairs.push([tie.teamIds[i], tie.teamIds[j]]);
+    for (const [position, [a, b]] of pairs.entries()) {
+      await c.query(
+        `INSERT INTO friend_games
+           (id, name, organizer_id, format, players_per_team, status, tournament_id, round,
+            position, team_a_id, team_b_id, stage, group_no, label, best_of)
+         VALUES ($1,$2,$3,$4,$5,'ready',$6,$7,$8,$9,$10,'decider',$11,'Tie-breaker',$12)`,
+        [nid("fg"), `${t.name} — Tie-breaker`, t.organizer_id, t.format, t.players_per_team,
+         t.id, thisRound, position, a, b, tie.group, tieBestOf],
+      );
+    }
+    const again = games.some(
+      (g) => g.stage === "decider" && tie.teamIds.includes(g.team_a_id ?? "") && tie.teamIds.includes(g.team_b_id ?? ""),
+    );
+    const how =
+      pairs.length === 1
+        ? "A rematch decides it"
+        : `Play-off: each of you plays the others once (${pairs.length} matches)`;
+    for (const x of tie.teamIds)
+      for (const pid of await teamPlayerIds(c, x))
+        await batch.notify(
+          pid,
+          "match_ready",
+          `${names.join(", ")} ${again ? "are still level" : "finished level on points"} in ${t.name}. ${how} — play your tie-breaker${pairs.length > 1 ? "s" : ""}.`,
+          href,
+        );
+  }
+}
+
+/**
+ * Groups: build the final rounds when the tournament starts, with each
+ * first-round slot labelled by where its player will come from ("Group A
+ * winner", "Group B runner-up"). A first-round BYE is skipped and its
+ * label moves straight to the next round.
+ */
+async function insertGroupFinalRounds(c: PoolClient, t: TournamentRow) {
+  const s = settingsOf(t);
+  const tokens = Array.from({ length: s.groups }, (_, gi) =>
+    Array.from({ length: s.advance }, (_, p) => `${gi + 1}:${p + 1}`),
+  );
+  const plan = planPlayoffs(s, tokens);
+  const ids = new Map(plan.filter((g) => !g.isBye).map((g) => [g.key, nid("fg")]));
+  const sourceFor = new Map<string, string>(); // `${key}:${slot}` → token
+  for (const g of plan)
+    for (const slot of ["a", "b"] as const) {
+      const tok = slot === "a" ? g.a : g.b;
+      if (!tok) continue;
+      if (g.isBye && g.winnerTo) sourceFor.set(`${g.winnerTo.key}:${g.winnerTo.slot}`, tok);
+      else if (!g.isBye) sourceFor.set(`${g.key}:${slot}`, tok);
+    }
+  for (const g of plan.filter((x) => !x.isBye)) {
+    await c.query(
+      `INSERT INTO friend_games
+         (id, name, organizer_id, format, players_per_team, status, tournament_id, round, position,
+          next_game_id, next_slot, is_bye, stage, label, loser_next_game_id, loser_next_slot, best_of,
+          a_source, b_source)
+       VALUES ($1,$2,$3,$4,$5,'waiting_for_players',$6,$7,$8,$9,$10,false,$11,$12,$13,$14,$15,$16,$17)`,
+      [
+        ids.get(g.key),
+        `${t.name} — ${g.label}`,
+        t.organizer_id,
+        t.format,
+        t.players_per_team,
+        t.id,
+        g.round,
+        g.position,
+        g.winnerTo ? ids.get(g.winnerTo.key) : null,
+        g.winnerTo?.slot ?? null,
+        g.stage,
+        g.label,
+        g.loserTo ? ids.get(g.loserTo.key) : null,
+        g.loserTo?.slot ?? null,
+        bestOfFor(s, g),
+        sourceFor.get(`${g.key}:a`) ?? null,
+        sourceFor.get(`${g.key}:b`) ?? null,
+      ],
+    );
+  }
 }
 
 /** everything is played: record the winner, pay placement points, tell everyone */
@@ -2832,6 +3039,7 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
       seeded,
     );
     await insertPlan(c, { ...t, status: "in_progress" }, plan, batch);
+    if (s.kind === "groups") await insertGroupFinalRounds(c, { ...t, status: "in_progress" });
 
     const players = (
       await inTx(c)<{ player_id: string }>(

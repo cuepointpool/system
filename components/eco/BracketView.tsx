@@ -44,7 +44,25 @@ export function BracketView({
                 key={ri}
                 className="flex min-w-[200px] flex-1 flex-col justify-center"
               >
-                <div className="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.16em] text-teal">
+                <div
+                  className={cn(
+                    "mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.16em]",
+                    r[0]?.roundName === "Final"
+                      ? "text-gold"
+                      : r[0]?.roundName === "Semi Final"
+                        ? "text-[#dfe5ec]"
+                        : r[0]?.roundName === "Quarter Final"
+                          ? "text-teal"
+                          : "text-sky-300",
+                  )}
+                >
+                  {r[0]?.roundName === "Final"
+                    ? "🏆 "
+                    : r[0]?.roundName === "Semi Final"
+                      ? "🥈 "
+                      : r[0]?.roundName === "Quarter Final"
+                        ? "⭐ "
+                        : ""}
                   {r[0]?.roundName ?? `Round ${ri + 1}`}
                   {(bestOf[r[0]?.roundName ?? ""] ?? 1) > 1 && (
                     <span className="ml-1.5 normal-case tracking-normal text-mist">
