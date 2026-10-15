@@ -39,7 +39,7 @@ export function TournamentCard({
   const meta = STATUS_META[t.status];
   const fill = Math.round((registeredCount / t.maxPlayers) * 100);
   const [mountNow] = useState(() => Date.now());
-  const future = +new Date(t.startAt) > mountNow;
+  const future = !!t.startAt && +new Date(t.startAt) > mountNow;
 
   return (
     <motion.article
@@ -77,7 +77,7 @@ export function TournamentCard({
           <p className="mt-1 line-clamp-2 text-[13px] text-mist">{t.summary}</p>
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-[12px]">
-            <Field k="Starts" v={formatDayTime(t.startAt)} />
+            <Field k="Starts" v={t.startAt ? formatDayTime(t.startAt) : "Date to be announced"} />
             <Field k="Prize pool" v={formatLKR(t.prizePool)} accent />
             <Field k="Entry" v={t.entryFee === 0 ? "Free" : formatLKR(t.entryFee)} />
             <Field k="Venue" v={t.venue.split(",")[0]} />
@@ -117,7 +117,7 @@ export function TournamentCard({
               <span className="text-xs text-mist">Details →</span>
             )}
             {future && t.status !== "completed" && (
-              <Countdown to={t.startAt} compact />
+              <Countdown to={t.startAt!} compact />
             )}
           </div>
         </div>

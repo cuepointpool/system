@@ -29,7 +29,7 @@ export function Dashboard({
   loyalty: LoyaltyTransaction[];
   membershipPlan: MembershipPlan | null;
   completion: number;
-  registeredTournaments: { name: string; slug: string; startAt: string }[];
+  registeredTournaments: { name: string; slug: string; startAt: string | null }[];
 }) {
   const { profile, stats, recentMatches, upcomingMatches } = view;
   const nextMatch = upcomingMatches[0];
@@ -314,9 +314,11 @@ export function Dashboard({
                   >
                     <span className="text-sm text-white">{t.name}</span>
                     <span className="text-[11px] text-teal">
-                      {new Date(t.startAt) > new Date()
-                        ? formatDateShort(t.startAt)
-                        : "In progress"}
+                      {!t.startAt
+                        ? "Date TBA"
+                        : new Date(t.startAt) > new Date()
+                          ? formatDateShort(t.startAt)
+                          : "In progress"}
                     </span>
                   </Link>
                 ))}

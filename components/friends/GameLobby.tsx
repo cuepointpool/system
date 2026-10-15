@@ -210,7 +210,7 @@ export function GameLobby({ initial, meId }: { initial: GameView; meId: string }
               </div>
             )}
 
-            {v.canReport && (
+            {v.canReport && !v.canSettle && (
               <div className="mt-4">
                 <p className="mb-2 text-xs text-mist">Who won?</p>
                 <div className="flex flex-wrap gap-2">
@@ -226,7 +226,8 @@ export function GameLobby({ initial, meId }: { initial: GameView; meId: string }
             {v.canSettle && g.status !== "completed" && (
               <div className="mt-4 border-t border-white/10 pt-4">
                 <p className="mb-2 text-xs text-mist">
-                  Organizer: set the final result yourself (skips confirmation).
+                  Who won? As the organizer your result is final — no confirmation needed. You can
+                  change it later if you tap the wrong one.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {teams.map((t) => (
@@ -240,6 +241,31 @@ export function GameLobby({ initial, meId }: { initial: GameView; meId: string }
           </Card>
         )}
 
+        {v.canChange && (
+          <Card>
+            <p className="text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">Wrong result?</p>
+            <p className="mt-2 text-xs text-mist">As the organizer you can fix it. Points move to the right players.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {teams
+                .filter((t) => t.id !== g.winnerTeamId)
+                .map((t) => (
+                  <GhostButton key={t.id} disabled={busy} onClick={() => act("settle", { winnerTeamId: t.id })}>
+                    Change: {t.name} won
+                  </GhostButton>
+                ))}
+              <GhostButton
+                danger
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm("Undo this result? The game goes back to in progress.")) void act("undo");
+                }}
+              >
+                Undo result
+              </GhostButton>
+            </div>
+          </Card>
+        )}
+
         {error && <Notice tone="error">{error}</Notice>}
       </div>
 
@@ -249,8 +275,8 @@ export function GameLobby({ initial, meId }: { initial: GameView; meId: string }
           <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-mist">
             <li>Everyone invited accepts the game.</li>
             <li>Any player starts it once all seats are filled.</li>
-            <li>One player reports the winner, the other side confirms.</li>
-            <li>Confirmed results add Friends League points to every player.</li>
+            <li>The organizer marks who won &mdash; that&apos;s final, and they can fix it if they tap the wrong one. Players can also report; the other side confirms.</li>
+            <li>Results add Friends League points. A 1v1 between two registered players also moves the Cue Point in-house leaderboard.</li>
           </ol>
         </Card>
         {(v.canLeave || v.canCancel) && (

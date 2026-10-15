@@ -8,6 +8,10 @@
    ============================================================ */
 
 import { query, queryOne, transaction } from "../pg";
+import { computeRanked, type RankedEntry } from "./ranked";
+import { hostedRoundLabel, normalizeHostedBestOf } from "./hosted";
+import { cancelCodeOk, newCancelCode } from "../cancel-code";
+import { bestOfLabel, checkScore } from "../friends/structure";
 import {
   assignRanks,
   pointsInWindow,
@@ -236,8 +240,8 @@ function mapTournamentBase(r: Row): Omit<Tournament, "registrations" | "bracket"
     summary: r.summary as string,
     format: r.format as Tournament["format"],
     status: r.status as TournamentStatus,
-    startAt: iso(r.start_at),
-    registrationDeadline: iso(r.registration_deadline),
+    startAt: isoOrNull(r.start_at),
+    registrationDeadline: isoOrNull(r.registration_deadline),
     entryFee: num(r.entry_fee),
     prizePool: num(r.prize_pool),
     prizeBreakdown: (r.prize_breakdown as Tournament["prizeBreakdown"]) ?? [],
@@ -245,6 +249,7 @@ function mapTournamentBase(r: Row): Omit<Tournament, "registrations" | "bracket"
     venue: r.venue as string,
     rules: (r.rules as string[]) ?? [],
     championId: (r.champion_id as string) ?? null,
+    bestOf: normalizeHostedBestOf(r.best_of),
   };
 }
 
@@ -553,6 +558,54 @@ export async function getLeaderboard(
   filtered.sort((a, b) => b.rankingPoints - a.rankingPoints || b.wins - a.wins);
   filtered.forEach((r, i) => (r.rank = i + 1));
   return filtered;
+}
+
+export type RankedLeaderboardRow = PlayerLite & Omit<RankedEntry, "playerId">;
+
+/**
+ * The Ranked leaderboard: points from Cue Point's own hosted tournaments only
+ * (see ranked.ts). Empty until the first one is completed.
+ */
+export async function getRankedLeaderboard(): Promise<{
+  rows: RankedLeaderboardRow[];
+  tournaments: number;
+}> {
+  const [tRows, mRows, { players }] = await Promise.all([
+    query<{ id: string; name: string; champion_id: string | null; start_at: Date | null }>(
+      `SELECT id, name, champion_id, COALESCE(start_at, created_at) AS start_at FROM tournaments WHERE status = 'completed'`,
+    ),
+    query<{ tournament_id: string; round: number; a_id: string | null; b_id: string | null; winner_id: string | null }>(
+      `SELECT m.tournament_id, m.round, m.a_id, m.b_id, m.winner_id
+         FROM tournament_matches m
+         JOIN tournaments t ON t.id = m.tournament_id AND t.status = 'completed'`,
+    ),
+    computeStats(),
+  ]);
+  const entries = computeRanked(
+    tRows.map((t) => ({
+      id: t.id,
+      name: t.name,
+      championId: t.champion_id,
+      completedAt: t.start_at ? new Date(t.start_at).toISOString() : "",
+    })),
+    mRows.map((m) => ({
+      tournamentId: m.tournament_id,
+      round: Number(m.round),
+      aId: m.a_id,
+      bId: m.b_id,
+      winnerId: m.winner_id,
+    })),
+  );
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const rows: RankedLeaderboardRow[] = [];
+  for (const e of entries) {
+    const p = byId.get(e.playerId);
+    if (!p) continue; // staff accounts / removed players don't rank
+    const { playerId: _drop, ...rest } = e;
+    void _drop;
+    rows.push({ ...toPlayerLite(p, rows.length + 1), ...rest });
+  }
+  return { rows, tournaments: tRows.length };
 }
 
 function emptyState(): PlayerRatingState {
@@ -906,7 +959,7 @@ async function assembleTournaments(baseRows: Row[]): Promise<Tournament[]> {
 }
 
 export async function getTournaments(): Promise<Tournament[]> {
-  const rows = await query<Row>(`SELECT * FROM tournaments ORDER BY start_at`);
+  const rows = await query<Row>(`SELECT * FROM tournaments ORDER BY start_at NULLS LAST, created_at`);
   return assembleTournaments(rows);
 }
 
@@ -925,7 +978,7 @@ async function getTournamentsForPlayer(
   const rows = await query<Row>(
     `SELECT DISTINCT t.* FROM tournaments t
      JOIN tournament_registrations tr ON tr.tournament_id = t.id
-     WHERE tr.player_id = $1 ORDER BY t.start_at`,
+     WHERE tr.player_id = $1 ORDER BY t.start_at NULLS LAST, t.created_at`,
     [playerId],
   );
   return assembleTournaments(rows);
@@ -942,8 +995,8 @@ export function derivedTournamentStatus(t: Tournament): TournamentStatus {
   if (t.status === "cancelled" || t.status === "completed") return t.status;
   const now = Date.now();
   if (t.championId) return "completed";
-  if (now >= +new Date(t.startAt)) return "live";
-  if (now > +new Date(t.registrationDeadline)) return "registration_closed";
+  if (t.startAt && now >= +new Date(t.startAt)) return "live";
+  if (t.registrationDeadline && now > +new Date(t.registrationDeadline)) return "registration_closed";
   return t.status === "upcoming" ? "upcoming" : "registration_open";
 }
 
@@ -959,6 +1012,11 @@ export async function registerForTournament(
 ): Promise<RegistrationResult> {
   const t = await getTournamentBySlug(slug);
   if (!t) return { ok: false, error: "Tournament not found" };
+  // Cue Point-hosted tournaments are for registered player accounts only —
+  // no guests, and staff/admin accounts don't play in them
+  const player = await getPlayerById(playerId);
+  if (!player || player.role !== "player")
+    return { ok: false, error: "You need a player account to enter Cue Point tournaments." };
   if (derivedTournamentStatus(t) !== "registration_open")
     return { ok: false, error: "Registration is closed for this tournament" };
   if (t.registrations.some((r) => r.playerId === playerId))
@@ -1035,6 +1093,23 @@ export async function recordMatch(
   const higher = input.scoreA > input.scoreB ? a.id : b.id;
   if (input.scoreA !== input.scoreB && higher !== input.winnerId)
     return { ok: false, error: "Winner does not match the scoreline" };
+
+  // a hosted-tournament match must finish the way its round is played
+  if (input.tournamentId) {
+    const [bm] = await query<{ round_name: string; best_of: Record<string, number> | null }>(
+      `SELECT m.round_name, t.best_of FROM tournament_matches m
+         JOIN tournaments t ON t.id = m.tournament_id
+        WHERE m.tournament_id = $1 AND m.winner_id IS NULL
+          AND ((m.a_id = $2 AND m.b_id = $3) OR (m.a_id = $3 AND m.b_id = $2))
+        ORDER BY m.round LIMIT 1`,
+      [input.tournamentId, a.id, b.id],
+    );
+    const bestOf = bm ? Number(bm.best_of?.[bm.round_name] ?? 1) : 1;
+    if (bestOf > 1) {
+      const problem = checkScore(bestOf, input.scoreA, input.scoreB);
+      if (problem) return { ok: false, error: `${bm!.round_name} is ${bestOfLabel(bestOf)}. ${problem}` };
+    }
+  }
 
   const before = (await computeStats()).stats;
   const aBefore = before.get(a.id)?.rankingPoints ?? RANKING_CONFIG.startPoints;
@@ -1424,14 +1499,16 @@ export interface NewTournament {
   name: string;
   summary?: string;
   format?: Tournament["format"];
-  startAt: string;
-  registrationDeadline: string;
+  startAt?: string | null;
+  registrationDeadline?: string | null;
   entryFee?: number;
   prizePool?: number;
   maxPlayers?: number;
   venue?: string;
   rules?: string[];
   cover?: string;
+  /** match length per round name — see lib/ecosystem/hosted.ts */
+  bestOf?: unknown;
 }
 
 export async function createTournament(
@@ -1449,8 +1526,8 @@ export async function createTournament(
     `INSERT INTO tournaments
       (id, slug, name, cover, summary, format, status, start_at,
        registration_deadline, entry_fee, prize_pool, prize_breakdown,
-       max_players, venue, rules)
-     VALUES ($1,$2,$3,$4,$5,$6,'registration_open',$7,$8,$9,$10,$11,$12,$13,$14)`,
+       max_players, venue, rules, best_of)
+     VALUES ($1,$2,$3,$4,$5,$6,'registration_open',$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       id,
       slug,
@@ -1458,8 +1535,8 @@ export async function createTournament(
       input.cover ?? "winter",
       input.summary ?? "",
       input.format ?? "single_elim",
-      input.startAt,
-      input.registrationDeadline,
+      input.startAt || null,
+      input.registrationDeadline || null,
       input.entryFee ?? 0,
       pool,
       JSON.stringify(
@@ -1474,38 +1551,66 @@ export async function createTournament(
       input.maxPlayers ?? 8,
       input.venue ?? "Cue Point Pool Parlour, Pitipana",
       JSON.stringify(input.rules ?? []),
+      JSON.stringify(normalizeHostedBestOf(input.bestOf)),
     ],
   );
   await audit(actor, "tournament.create", "tournament", id, input.name);
   return (await getTournamentBySlug(slug))!;
 }
 
+/** step 1 of cancelling a hosted tournament: a code staff must type back */
+export async function requestHostedCancelCode(slug: string): Promise<string | null> {
+  const { code, hash, expires } = newCancelCode();
+  const rows = await query<{ id: string }>(
+    `UPDATE tournaments SET cancel_code_hash = $2, cancel_code_expires = $3
+      WHERE slug = $1 AND status NOT IN ('completed','cancelled') RETURNING id`,
+    [slug, hash, expires],
+  );
+  return rows[0] ? code : null;
+}
+
+export class CancelCodeError extends Error {}
+
 export async function setTournamentStatus(
   slug: string,
   status: TournamentStatus,
   actor: string,
+  code?: unknown,
 ): Promise<Tournament | undefined> {
-  await query(`UPDATE tournaments SET status = $2 WHERE slug = $1`, [
-    slug,
-    status,
-  ]);
+  if (status === "cancelled") {
+    const [t] = await query<{ cancel_code_hash: string | null; cancel_code_expires: Date | null }>(
+      `SELECT cancel_code_hash, cancel_code_expires FROM tournaments WHERE slug = $1`,
+      [slug],
+    );
+    if (!t || !cancelCodeOk(code, t.cancel_code_hash, t.cancel_code_expires))
+      throw new CancelCodeError("That code doesn't match or has expired. Get a new code and try again.");
+  }
+  await query(
+    `UPDATE tournaments SET status = $2, cancel_code_hash = NULL, cancel_code_expires = NULL WHERE slug = $1`,
+    [slug, status],
+  );
   await audit(actor, "tournament.status", "tournament", slug, status);
   return getTournamentBySlug(slug);
 }
 
-const ROUND_NAMES: Record<number, string> = {
-  1: "Round 1",
-  2: "Quarter Final",
-  3: "Semi Final",
-  4: "Final",
-};
-
 function roundLabel(round: number, totalRounds: number): string {
-  const fromEnd = totalRounds - round; // 0 = final
-  if (fromEnd === 0) return "Final";
-  if (fromEnd === 1) return "Semi Final";
-  if (fromEnd === 2) return "Quarter Final";
-  return ROUND_NAMES[round] ?? `Round ${round}`;
+  return hostedRoundLabel(round, totalRounds);
+}
+
+/** set how long each round's matches are (already-played matches keep their scores) */
+export async function setTournamentBestOf(
+  slug: string,
+  bestOf: unknown,
+  actor: string,
+): Promise<Tournament | null> {
+  const clean = normalizeHostedBestOf(bestOf);
+  const rows = await query<{ id: string }>(
+    `UPDATE tournaments SET best_of = $2 WHERE slug = $1 RETURNING id`,
+    [slug, JSON.stringify(clean)],
+  );
+  if (!rows[0]) return null;
+  await audit(actor, "tournament.best_of", "tournament", rows[0].id, JSON.stringify(clean));
+  return (await getTournamentBySlug(slug)) ?? null;
 }
 
 export interface BracketResult {
@@ -1586,8 +1691,6 @@ export async function generateBracket(
     node.bId = firstRound[pos * 2 + 1] ?? null;
   });
 
-  const startAt = t.startAt;
-
   await transaction(async (client) => {
     // register seeds
     for (let i = 0; i < seeded.length; i++) {
@@ -1611,8 +1714,8 @@ export async function generateBracket(
           node.position,
           node.aId,
           node.bId,
-          startAt,
-          `Table ${(node.position % 2) + 1}`,
+          null,
+          null,
           node.nextId,
         ],
       );

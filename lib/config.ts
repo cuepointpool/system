@@ -42,7 +42,7 @@ export const SITE = {
  *  to false when the parlour opens. `openingDate` is optional free text
  *  (e.g. "Saturday, 11 October") — leave it empty to show no date. */
 export const OPENING_NOTICE = {
-  enabled: true,
+  enabled: false, // open since October 2026
   headline: "We're opening soon",
   message:
     "Cue Point is getting ready to open its doors in Pitipana, Homagama. Book your table now and be one of the first to play.",

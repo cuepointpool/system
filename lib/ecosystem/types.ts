@@ -168,8 +168,10 @@ export interface Tournament {
   summary: string;
   format: TournamentFormat;
   status: TournamentStatus;
-  startAt: string; // ISO
-  registrationDeadline: string; // ISO
+  /** ISO, or null — dates are optional; a tournament can run over any number of days */
+  startAt: string | null;
+  /** ISO, or null — registration then stays open until staff close it */
+  registrationDeadline: string | null;
   entryFee: number;
   prizePool: number;
   prizeBreakdown: { place: string; amount: number }[];
@@ -179,6 +181,8 @@ export interface Tournament {
   registrations: TournamentPlayerSlot[];
   bracket: BracketMatch[];
   championId: string | null;
+  /** match length per round name ("Semi Final" → 5); missing = single frame / free score */
+  bestOf: Record<string, number>;
 }
 
 export interface LoyaltyTransaction {

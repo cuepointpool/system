@@ -4,6 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Tabs } from "./Primitives";
 import { DailyLogTab } from "./DailyLogTab";
+import { hostedRounds } from "@/lib/ecosystem/hosted";
+import { BEST_OF_OPTIONS, bestOfLabel, framesToWin } from "@/lib/friends/structure";
 import { cn, formatDateShort, formatLKR, label12h, timeAgo } from "@/lib/utils";
 import {
   EXPENSE_CATEGORIES,
@@ -535,6 +537,30 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
               </Field>
             </div>
 
+            {form.type === "tournament" && (() => {
+              const t = (tournaments ?? []).find((x) => x.id === form.tournamentId);
+              const bm = t?.bracket.find(
+                (m) =>
+                  !m.winnerId &&
+                  ((m.aId === form.playerAId && m.bId === form.playerBId) ||
+                    (m.aId === form.playerBId && m.bId === form.playerAId)),
+              );
+              if (!t || !form.playerAId || !form.playerBId) return null;
+              if (!bm)
+                return (
+                  <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+                    These two don&apos;t have an open match in {t.name}&apos;s bracket.
+                  </p>
+                );
+              const n = t.bestOf[bm.roundName] ?? 1;
+              return (
+                <p className="rounded-lg border border-teal/30 bg-teal/10 px-3 py-2 text-xs text-teal">
+                  {bm.roundName} · {bestOfLabel(n)}
+                  {n > 1 ? ` — first to ${framesToWin(n)} frames` : ""}
+                </p>
+              );
+            })()}
+
             <Field label="Score">
               <div className="flex items-center gap-3">
                 <ScoreStepper
@@ -1007,6 +1033,8 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
     format: "single_elim",
     rules: "8-ball, World Rules. Race to 7 (final race to 9).\nWinner breaks. Standard 3-foul rule.\nReport 15 minutes before your match.",
   });
+  const [bestOf, setBestOf] = useState<Record<string, number>>({});
+  const [cancelling, setCancelling] = useState<{ slug: string; code: string; typed: string } | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -1016,6 +1044,7 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
     try {
       const res = await jpost("/api/staff/tournaments", headers, {
         ...form,
+        bestOf,
         entryFee: Number(form.entryFee),
         prizePool: Number(form.prizePool),
         maxPlayers: Number(form.maxPlayers),
@@ -1062,7 +1091,7 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Starts">
+            <Field label="Starts (optional)">
               <input
                 type="datetime-local"
                 className="input"
@@ -1072,7 +1101,7 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
                 }
               />
             </Field>
-            <Field label="Registration deadline">
+            <Field label="Registration deadline (optional)">
               <input
                 type="datetime-local"
                 className="input"
@@ -1121,6 +1150,13 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
               </select>
             </Field>
           </div>
+          <Field label="Match length per round">
+            <BestOfRows
+              rounds={hostedRounds(Number(form.maxPlayers))}
+              value={bestOf}
+              onChange={setBestOf}
+            />
+          </Field>
           <Field label="Rules (one per line)">
             <textarea
               className="input resize-none"
@@ -1132,12 +1168,7 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
           <Msg msg={msg} />
           <button
             onClick={create}
-            disabled={
-              busy ||
-              !form.name ||
-              !form.startAt ||
-              !form.registrationDeadline
-            }
+            disabled={busy || !form.name}
             className="btn-primary w-full py-3 text-sm disabled:opacity-40"
           >
             {busy ? "…" : "Create tournament"}
@@ -1166,8 +1197,12 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
               <div className="mt-1 text-[12px] text-mist">
                 {t.registeredCount}/{t.maxPlayers} players ·{" "}
                 {t.bracket.length ? "bracket generated" : "no bracket"} ·{" "}
-                {formatDateShort(t.startAt)}
+                {t.startAt ? formatDateShort(t.startAt) : "no date set"}
               </div>
+              <TournamentLengths
+                t={t}
+                onSave={(value) => act(t.slug, { action: "best-of", bestOf: value })}
+              />
               <div className="mt-3 flex flex-wrap gap-2">
                 {t.status === "registration_open" && (
                   <button
@@ -1190,20 +1225,53 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
                     Generate bracket
                   </button>
                 )}
-                {t.status !== "completed" && t.status !== "cancelled" && (
+                {t.status !== "completed" && t.status !== "cancelled" && cancelling?.slug !== t.slug && (
                   <button
-                    onClick={() =>
-                      act(t.slug, {
-                        action: "set-status",
-                        status: "cancelled",
-                      })
-                    }
+                    onClick={async () => {
+                      const res = await jpatch("/api/staff/tournaments", headers, { slug: t.slug, action: "cancel-code" });
+                      const d = await res.json();
+                      if (res.ok) setCancelling({ slug: t.slug, code: d.code, typed: "" });
+                      else setMsg({ ok: false, text: d.error });
+                    }}
                     className="btn-ghost !px-3 !py-1.5 text-xs text-rose-300"
                   >
                     Cancel
                   </button>
                 )}
               </div>
+              {cancelling?.slug === t.slug && (
+                <div className="mt-3 rounded-lg border border-rose-400/30 bg-rose-400/10 p-3">
+                  <p className="text-xs text-rose-100">
+                    Cancel {t.name}? Type this code to confirm:{" "}
+                    <strong className="font-display text-base tracking-[0.25em] text-white">{cancelling.code}</strong>
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <input
+                      value={cancelling.typed}
+                      onChange={(e) =>
+                        setCancelling({ ...cancelling, typed: e.target.value.replace(/\D/g, "").slice(0, 6) })
+                      }
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="Code"
+                      className="input !w-32 text-center tracking-[0.2em]"
+                    />
+                    <button
+                      disabled={cancelling.typed !== cancelling.code}
+                      onClick={async () => {
+                        await act(t.slug, { action: "set-status", status: "cancelled", code: cancelling.typed });
+                        setCancelling(null);
+                      }}
+                      className="btn-ghost !px-3 !py-1.5 text-xs text-rose-300 disabled:opacity-40"
+                    >
+                      Yes, cancel it
+                    </button>
+                    <button onClick={() => setCancelling(null)} className="btn-primary !px-3 !py-1.5 text-xs">
+                      Keep it
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           {list && list.length === 0 && (
@@ -1216,6 +1284,94 @@ function TournamentsTab({ headers }: { headers: Record<string, string> }) {
           set when the final is entered.
         </p>
       </Panel>
+    </div>
+  );
+}
+
+/** one row per round: Single frame / Bo3 / Bo5 / Bo7 / Bo9 */
+function BestOfRows({
+  rounds,
+  value,
+  onChange,
+}: {
+  rounds: string[];
+  value: Record<string, number>;
+  onChange: (v: Record<string, number>) => void;
+}) {
+  return (
+    <div className="space-y-1.5 rounded-lg border border-white/10 bg-white/[0.02] p-3">
+      {rounds.map((r) => (
+        <div key={r} className="flex flex-wrap items-center gap-1.5">
+          <span className="w-28 shrink-0 text-xs text-white">{r}</span>
+          {BEST_OF_OPTIONS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onChange({ ...value, [r]: n })}
+              title={bestOfLabel(n)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                (value[r] ?? 1) === n
+                  ? "border-teal bg-teal/15 text-white"
+                  : "border-white/10 text-mist hover:text-white",
+              )}
+            >
+              {n === 1 ? "1 frame" : `Bo${n}`}
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TournamentLengths({
+  t,
+  onSave,
+}: {
+  t: Tournament;
+  onSave: (v: Record<string, number>) => Promise<void> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Record<string, number>>(t.bestOf);
+  const size = t.bracket.length ? t.bracket.filter((m) => m.round === 1).length * 2 : t.maxPlayers;
+  const rounds = hostedRounds(size);
+  return (
+    <div className="mt-2 text-[12px] text-mist">
+      {!editing ? (
+        <span>
+          {rounds.map((r) => `${r}: ${(t.bestOf[r] ?? 1) === 1 ? "1 frame" : `Bo${t.bestOf[r]}`}`).join(" · ")}{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(t.bestOf);
+              setEditing(true);
+            }}
+            className="ml-1 text-teal hover:underline"
+          >
+            Edit
+          </button>
+        </span>
+      ) : (
+        <div className="mt-1 space-y-2">
+          <BestOfRows rounds={rounds} value={draft} onChange={setDraft} />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                await onSave(draft);
+                setEditing(false);
+              }}
+              className="btn-primary !px-3 !py-1.5 text-xs"
+            >
+              Save
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className="btn-ghost !px-3 !py-1.5 text-xs">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

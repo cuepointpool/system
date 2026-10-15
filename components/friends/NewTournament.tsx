@@ -1,71 +1,57 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PlayerAvatar } from "@/components/eco/Primitives";
 import { cn } from "@/lib/utils";
-import { generateBracket, roundName } from "@/lib/friends/bracket";
-import {
-  FORMAT_LIST,
-  FORMATS,
-  MAX_TOURNAMENT_TEAMS,
-  MIN_TEAMS_TO_START,
-  TOURNAMENT_SIZES,
-  type FormatCode,
-} from "@/lib/friends/formats";
-import { validateTournamentRoster } from "@/lib/friends/validate";
+import { FORMATS, MAX_TOURNAMENT_TEAMS, MIN_TEAMS_TO_START, type FormatCode } from "@/lib/friends/formats";
+import { DEFAULT_SETTINGS, describe, validateSettings, type TournamentSettings } from "@/lib/friends/structure";
 import { apiPost } from "./api";
+import { FormatPicker, formatLine, recommendedKind } from "./FormatPicker";
 import { GuestAdder, PlayerPicker, type PickedPlayer } from "./PlayerPicker";
-import { Card, CountBar, GhostButton, Notice, PrimaryButton } from "./ui";
+import { Card, Notice, PrimaryButton } from "./ui";
+
+/* ------------------------------------------------------------------
+   Create a tournament — one simple question per screen:
+     1. Singles or doubles?   2. Who's playing?
+     3. How do you want to play?   4. Check and create
+   Big buttons, plain words, Back / Next at the bottom.
+   ------------------------------------------------------------------ */
+
+const STEPS = ["Game", "Players", "How to play", "Check"] as const;
 
 export function NewTournament({ me }: { me: PickedPlayer }) {
   const router = useRouter();
+  const [step, setStep] = useState(0);
   const [format, setFormat] = useState<FormatCode>("1v1");
-  const [size, setSize] = useState<number>(8);
-  const [custom, setCustom] = useState(false);
-  const isCustom = custom;
   const [name, setName] = useState("");
-  const [seeding, setSeeding] = useState<"random" | "ranking">("random");
   const [teams, setTeams] = useState<PickedPlayer[][]>([]);
   const [draft, setDraft] = useState<PickedPlayer[]>([]);
-  const [removing, setRemoving] = useState(false);
+  const [places, setPlaces] = useState<number | null>(null); // null = same as the players added
+  const [settings, setSettings] = useState<TournamentSettings>(DEFAULT_SETTINGS);
+  const [styleChosen, setStyleChosen] = useState(false);
+  const [seeding, setSeeding] = useState<"random" | "ranking">("random");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const f = FORMATS[format];
   const ppt = f.playersPerTeam;
   const noun = f.sideNoun; // "player" | "team"
-  const playersInTeams = teams.reduce((n, t) => n + t.length, 0);
-  const check = useMemo(
-    () => validateTournamentRoster(f, size, teams.length, playersInTeams),
-    [f, size, teams.length, playersInTeams],
-  );
-
-  const bracket = useMemo(() => {
-    if (teams.length < MIN_TEAMS_TO_START) return null;
-    const b = generateBracket(Array.from({ length: teams.length }, (_, i) => i));
-    const rounds = Array.from({ length: b.rounds }, (_, i) => ({
-      name: roundName(i + 1, b.rounds),
-      matches: b.games.filter((g) => g.round === i + 1 && !g.isBye).length,
-    }));
-    return { rounds, byes: b.byes };
-  }, [teams.length]);
-
+  const size = Math.min(MAX_TOURNAMENT_TEAMS, Math.max(MIN_TEAMS_TO_START, places ?? teams.length));
+  // until they pick a style themselves, suggest the one that suits the numbers
+  const chosen: TournamentSettings = styleChosen ? settings : { ...settings, kind: recommendedKind(size) };
+  const formatProblem = validateSettings(chosen, size);
   const taken = (id: string) => teams.some((t) => t.some((p) => p.id === id)) || draft.some((p) => p.id === id);
 
   function pick(p: PickedPlayer) {
     setError(null);
     if (taken(p.id)) {
-      setError(
-        ppt === 1
-          ? `${p.nickname} is already in this tournament.`
-          : `${p.nickname} is already a member of another team in this tournament.`,
-      );
+      setError(ppt === 1 ? `${p.nickname} is already in.` : `${p.nickname} is already in a team.`);
       return;
     }
-    if (teams.length >= size && draft.length === 0) {
-      setError(`This tournament is already full (${teams.length}/${size} ${noun}s).`);
+    if (teams.length >= MAX_TOURNAMENT_TEAMS) {
+      setError(`That's the most a tournament can have (${MAX_TOURNAMENT_TEAMS}).`);
       return;
     }
     const next = [...draft, p];
@@ -73,11 +59,6 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
       setTeams((cur) => [...cur, next]);
       setDraft([]);
     } else setDraft(next);
-  }
-
-  function removeTeam(i: number) {
-    setTeams((cur) => cur.filter((_, k) => k !== i));
-    setRemoving(false);
   }
 
   async function create() {
@@ -88,6 +69,7 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
       format,
       capacityTeams: size,
       seeding,
+      settings: chosen,
       teams: teams.map((t) => ({
         playerIds: t.filter((p) => !p.guest).map((p) => p.id),
         guests: t.filter((p) => p.guest).map((p) => p.nickname),
@@ -101,308 +83,280 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
     router.push(`/play/tournaments/${r.data.id}`);
   }
 
-  const canCreate = check.state !== "over" && draft.length === 0;
+  const canNext =
+    step === 0 ||
+    (step === 1 && teams.length >= MIN_TEAMS_TO_START && draft.length === 0) ||
+    (step === 2 && !formatProblem);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-      <div className="space-y-6">
-        <Card>
-          <p className="text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">1 · Game & format</p>
-          <p className="mt-2 text-sm text-white">
-            8-Ball Pool <span className="text-mist">· Single elimination · 9-foot tables</span>
-          </p>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            {FORMAT_LIST.map((opt) => (
-              <button
-                key={opt.code}
-                type="button"
-                onClick={() => {
-                  setFormat(opt.code);
-                  setTeams([]);
-                  setDraft([]);
-                }}
-                className={cn(
-                  "rounded-xl border p-4 text-left transition-colors",
-                  format === opt.code
-                    ? "border-[#a78bfa]/70 bg-[#a78bfa]/10"
-                    : "border-white/10 bg-white/[0.02] hover:border-white/25",
-                )}
-              >
-                <span className="block font-display text-lg font-semibold text-white">{opt.code}</span>
-                <span className="text-xs text-mist">
-                  {opt.playersPerTeam === 1 ? "Every player is an entry" : "Teams of 2 are the entries"}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          <p className="mt-5 text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">2 · Size</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {TOURNAMENT_SIZES.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  setCustom(false);
-                  setSize(s);
-                }}
-                className={cn(
-                  "rounded-xl border px-4 py-2.5 text-left transition-colors",
-                  !isCustom && size === s
-                    ? "border-[#a78bfa]/70 bg-[#a78bfa]/10"
-                    : "border-white/10 bg-white/[0.02] hover:border-white/25",
-                )}
-              >
-                <span className="block font-display text-base font-semibold text-white">
-                  {s} {noun}s
-                </span>
-                <span className="text-[11px] text-mist">
-                  {s * ppt} players needed
-                </span>
-              </button>
-            ))}
+    <div className="mx-auto max-w-2xl">
+      {/* progress */}
+      <ol className="mb-6 grid grid-cols-4 gap-2" aria-label="Steps">
+        {STEPS.map((label, i) => (
+          <li key={label}>
             <button
               type="button"
-              onClick={() => setCustom(true)}
-              className={cn(
-                "rounded-xl border px-4 py-2.5 text-left transition-colors",
-                isCustom
-                  ? "border-[#a78bfa]/70 bg-[#a78bfa]/10"
-                  : "border-white/10 bg-white/[0.02] hover:border-white/25",
-              )}
+              disabled={i > step}
+              onClick={() => setStep(i)}
+              className="w-full text-left disabled:cursor-default"
             >
-              <span className="block font-display text-base font-semibold text-white">Any number</span>
-              <span className="text-[11px] text-mist">Odd sizes get BYEs</span>
+              <span className={cn("block h-1.5 rounded-full", i <= step ? "bg-[#a78bfa]" : "bg-white/10")} />
+              <span className={cn("mt-1.5 block text-[11px] font-medium", i === step ? "text-white" : "text-mist")}>
+                {i + 1}. {label}
+              </span>
             </button>
-          </div>
-          {isCustom && (
-            <div className="mt-3 flex items-center gap-3">
-              <GhostButton onClick={() => setSize((s) => Math.max(MIN_TEAMS_TO_START, s - 1))}>−</GhostButton>
-              <span className="min-w-[8rem] text-center font-display text-lg font-semibold text-white">
-                {size} {noun}s
-              </span>
-              <GhostButton onClick={() => setSize((s) => Math.min(MAX_TOURNAMENT_TEAMS, s + 1))}>+</GhostButton>
-              <span className="text-[11px] text-mist">
-                {MIN_TEAMS_TO_START}–{MAX_TOURNAMENT_TEAMS}
-              </span>
+          </li>
+        ))}
+      </ol>
+
+      <Card className="p-5 sm:p-7">
+        {step === 0 && (
+          <>
+            <h2 className="font-display text-2xl font-bold text-white">Singles or doubles?</h2>
+            <p className="mt-1 text-sm text-mist">8-Ball on 9-foot tables.</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {(["1v1", "2v2"] as const).map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => {
+                    if (code !== format) {
+                      setFormat(code);
+                      setTeams([]);
+                      setDraft([]);
+                    }
+                  }}
+                  aria-pressed={format === code}
+                  className={cn(
+                    "rounded-2xl border-2 p-5 text-left transition-colors",
+                    format === code ? "border-[#a78bfa] bg-[#a78bfa]/15" : "border-white/10 hover:border-white/30",
+                  )}
+                >
+                  <span aria-hidden className="text-2xl">{code === "1v1" ? "👤" : "👥"}</span>
+                  <span className="mt-2 block font-display text-xl font-semibold text-white">
+                    {code === "1v1" ? "Singles" : "Doubles"}
+                  </span>
+                  <span className="text-sm text-mist">
+                    {code === "1v1" ? "One player against one player" : "Teams of two players"}
+                  </span>
+                </button>
+              ))}
             </div>
-          )}
-          {format === "2v2" && (
-            <p className="mt-3 text-xs text-mist">
-              A 2v2 tournament of {size} teams needs {size} × 2 = <strong className="text-white">{size * 2} players</strong>.
-            </p>
-          )}
+            <label className="mt-6 block">
+              <span className="text-sm font-semibold text-white">Give it a name (optional)</span>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={60}
+                placeholder="Friday Night 8-Ball"
+                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3.5 text-base text-white placeholder:text-mist/60 focus:border-[#a78bfa]/60 focus:outline-none"
+              />
+            </label>
+          </>
+        )}
 
-          <label className="mt-5 block text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">
-            Name (optional)
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={60}
-              placeholder="CuePoint Friday 8-Ball Tournament"
-              className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm normal-case tracking-normal text-white placeholder:text-mist/60 focus:border-[#a78bfa]/60 focus:outline-none"
-            />
-          </label>
-
-          <p className="mt-5 text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">Draw</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(
-              [
-                ["random", "Random draw"],
-                ["ranking", "Seed by ranking points"],
-              ] as const
-            ).map(([v, label]) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setSeeding(v)}
-                className={cn(
-                  "rounded-full border px-4 py-2 text-xs font-medium transition-colors",
-                  seeding === v
-                    ? "border-[#a78bfa]/70 bg-[#a78bfa]/10 text-white"
-                    : "border-white/10 text-mist hover:text-white",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <p className="text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">
-            3 · Add {ppt === 1 ? "players" : "teams"}
-          </p>
-          {ppt > 1 && (
-            <p className="mt-2 text-xs text-mist">
-              Pick two friends to make a team{draft.length === 1 ? ` — ${draft[0].nickname} needs a partner` : ""}.
+        {step === 1 && (
+          <>
+            <h2 className="font-display text-2xl font-bold text-white">Who&apos;s playing?</h2>
+            <p className="mt-1 text-sm text-mist">
+              {ppt === 1
+                ? `Add at least ${MIN_TEAMS_TO_START} players. You can add more later.`
+                : `Add teams of two — pick two people for each team. At least ${MIN_TEAMS_TO_START} teams.`}
             </p>
-          )}
-          <div className="mt-3">
-            <PlayerPicker exclude={new Set()} onPick={pick} />
-          </div>
-          <div className="mt-4 border-t border-white/10 pt-4">
-            <p className="text-sm font-medium text-white">Friend not registered? Add them as a guest</p>
-            <p className="mb-3 mt-1 text-xs text-mist">
-              Just type a name. Guests can play, but a match with a guest earns nobody Friends League
-              points.
-            </p>
-            <GuestAdder onAdd={pick} />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
             {!taken(me.id) && (
               <button
                 type="button"
                 onClick={() => pick(me)}
-                className="text-xs font-medium text-[#c4b5fd] underline-offset-2 hover:underline"
+                className="mt-4 w-full rounded-xl border-2 border-dashed border-[#a78bfa]/50 px-4 py-3 text-sm font-semibold text-[#c4b5fd] hover:bg-[#a78bfa]/10"
               >
-                + Add myself as a player
+                + Add me
               </button>
             )}
-            {draft.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setDraft([])}
-                className="text-xs text-mist underline-offset-2 hover:underline"
-              >
-                Clear unfinished team
-              </button>
-            )}
-          </div>
-          <p className="mt-3 text-xs text-mist">
-            Only the registered players you add can see this tournament. You can keep adding people
-            after you create it.
-          </p>
-        </Card>
-      </div>
-
-      <div className="space-y-4">
-        <Card>
-          <div className="space-y-4">
-            <CountBar label={ppt === 1 ? "Players" : "Teams"} have={teams.length} need={size} />
-            {ppt > 1 && <CountBar label="Players" have={playersInTeams} need={check.players.required} />}
-          </div>
-          <p
-            role="status"
-            className={cn(
-              "mt-3 text-sm",
-              check.state === "ok" ? "text-teal" : check.state === "over" ? "text-red-300" : "text-mist",
-            )}
-          >
-            {check.message}
-            {check.state === "short" && teams.length > 0 && " You can invite the rest after creating."}
-            {check.state === "short" && teams.length >= MIN_TEAMS_TO_START && (
-              <>
-                {" "}
-                Short on {noun}s? You can still start with the {teams.length} you have; empty places become
-                BYEs, or pick <strong className="text-white">Any number</strong> to match exactly.
-              </>
-            )}
-          </p>
-
-          {check.state === "over" && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              <GhostButton onClick={() => setRemoving(true)}>
-                Remove {teams.length - size} {noun}
-                {teams.length - size === 1 ? "" : "s"}
-              </GhostButton>
-              <GhostButton
-                onClick={() => {
-                  setCustom(true);
-                  setSize(Math.min(MAX_TOURNAMENT_TEAMS, Math.max(MIN_TEAMS_TO_START, teams.length)));
-                }}
-              >
-                Change size
-              </GhostButton>
-              <GhostButton danger onClick={() => router.push("/play")}>
-                Cancel
-              </GhostButton>
+            <div className="mt-4">
+              <p className="mb-2 text-sm font-semibold text-white">Find a Cue Point member</p>
+              <PlayerPicker exclude={new Set()} onPick={pick} />
             </div>
-          )}
-          {removing && (
-            <p className="mt-3 text-xs text-[#ffc98f]">
-              Tap the ✕ next to the {noun} you want to remove. Nobody is removed automatically.
-            </p>
-          )}
-
-          <ul className="mt-5 space-y-2">
-            {teams.map((t, i) => (
-              <li key={t.map((p) => p.id).join("+")} className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2">
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-white/10 text-[11px] text-mist">
-                  {i + 1}
-                </span>
-                <span className="flex flex-1 items-center gap-2 truncate text-sm text-white">
-                  {t.map((p) => (
-                    <PlayerAvatar key={p.id} name={p.nickname} src={p.avatar} size="xs" />
-                  ))}
-                  <span className="truncate">{t.map((p) => p.nickname).join(" & ")}</span>
-                  {t.some((p) => p.guest) && (
-                    <span className="shrink-0 rounded-full border border-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mist">
-                      Guest
-                    </span>
-                  )}
-                </span>
-                <button
-                  type="button"
-                  aria-label="Remove"
-                  onClick={() => removeTeam(i)}
-                  className={cn(
-                    "grid h-6 w-6 place-items-center rounded-full text-xs text-mist hover:bg-red-400/20 hover:text-red-300",
-                    removing && "animate-pulse bg-red-400/20 text-red-300",
-                  )}
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
+            <div className="mt-4">
+              <p className="mb-1 text-sm font-semibold text-white">Not a member? Type their name</p>
+              <p className="mb-2 text-xs text-mist">They can play, but their matches don&apos;t earn points.</p>
+              <GuestAdder onAdd={pick} />
+            </div>
             {draft.length > 0 && (
-              <li className="rounded-xl border border-dashed border-[#a78bfa]/50 px-3 py-2 text-sm text-[#c4b5fd]">
-                {draft.map((p) => p.nickname).join(" & ")} + 1 more player to complete this team
-              </li>
-            )}
-            {teams.length === 0 && draft.length === 0 && (
-              <li className="text-sm text-mist">No {noun}s added yet.</li>
-            )}
-          </ul>
-        </Card>
-
-        {bracket && (
-          <Card>
-            <p className="text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">
-              Bracket (built automatically)
-            </p>
-            <p className="mt-2 text-xs text-mist">
-              With {teams.length} {noun}s the bracket is generated for you when you start.
-            </p>
-            <ol className="mt-3 space-y-1.5 text-sm">
-              {bracket.rounds.map((r) => (
-                <li key={r.name} className="flex justify-between text-white">
-                  <span>{r.name}</span>
-                  <span className="text-mist">
-                    {r.matches} match{r.matches === 1 ? "" : "es"}
-                  </span>
-                </li>
-              ))}
-            </ol>
-            {bracket.byes > 0 && (
-              <p className="mt-3 text-xs text-[#ffc98f]">
-                {bracket.byes} BYE{bracket.byes === 1 ? "" : "s"} — the top {bracket.byes === 1 ? "seed" : "seeds"} advance
-                automatically.
+              <p className="mt-4 rounded-xl border border-dashed border-[#a78bfa]/50 px-4 py-3 text-sm text-[#c4b5fd]">
+                {draft.map((p) => p.nickname).join(" & ")} — add one more person to finish this team.{" "}
+                <button type="button" onClick={() => setDraft([])} className="underline">
+                  Clear
+                </button>
               </p>
             )}
-          </Card>
+
+            <p className="mb-2 mt-6 text-sm font-semibold text-white">
+              {ppt === 1 ? "Players" : "Teams"} ({teams.length})
+            </p>
+            {teams.length === 0 ? (
+              <p className="text-sm text-mist">Nobody yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {teams.map((t, i) => (
+                  <li key={t.map((p) => p.id).join("+")} className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2.5">
+                    <span className="w-5 text-center text-sm text-mist">{i + 1}</span>
+                    {t.map((p) => (
+                      <PlayerAvatar key={p.id} name={p.nickname} src={p.avatar} size="xs" />
+                    ))}
+                    <span className="min-w-0 flex-1 truncate text-sm text-white">
+                      {t.map((p) => p.nickname).join(" & ")}
+                      {t.some((p) => p.guest) && <span className="ml-2 text-xs text-mist">(guest)</span>}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${t.map((p) => p.nickname).join(" & ")}`}
+                      onClick={() => setTeams((cur) => cur.filter((_, k) => k !== i))}
+                      className="rounded-lg px-3 py-1.5 text-xs text-mist hover:bg-red-400/15 hover:text-red-300"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <p className="text-sm text-white">
+                Places in the tournament: <strong>{size}</strong>
+              </p>
+              <p className="mt-0.5 text-xs text-mist">
+                Leave room if more {noun}s will join later — you can invite them from the tournament page.
+              </p>
+              <div className="mt-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  aria-label="Fewer places"
+                  disabled={size <= Math.max(MIN_TEAMS_TO_START, teams.length)}
+                  onClick={() => setPlaces(Math.max(MIN_TEAMS_TO_START, teams.length, size - 1))}
+                  className="grid h-10 w-10 place-items-center rounded-full border border-white/15 text-lg text-white disabled:opacity-30"
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  aria-label="More places"
+                  disabled={size >= MAX_TOURNAMENT_TEAMS}
+                  onClick={() => setPlaces(size + 1)}
+                  className="grid h-10 w-10 place-items-center rounded-full border border-white/15 text-lg text-white disabled:opacity-30"
+                >
+                  +
+                </button>
+                {places !== null && (
+                  <button type="button" onClick={() => setPlaces(null)} className="text-xs text-mist underline">
+                    Just the {noun}s I added
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
         )}
 
-        {error && <Notice tone="error">{error}</Notice>}
-        <div className="flex items-center gap-3">
-          <PrimaryButton onClick={create} disabled={!canCreate || busy} className="flex-1 py-3">
-            {busy ? "Creating…" : "Create tournament"}
-          </PrimaryButton>
-          <Link href="/play" className="text-sm text-mist hover:text-white">
-            Cancel
-          </Link>
+        {step === 2 && (
+          <>
+            <h2 className="font-display text-2xl font-bold text-white">How do you want to play?</h2>
+            <p className="mb-5 mt-1 text-sm text-mist">Pick one. You can change it any time before you start.</p>
+            <FormatPicker
+              value={chosen}
+              onChange={(s) => {
+                setStyleChosen(true);
+                setSettings(s);
+              }}
+              entries={size}
+              noun={noun}
+            />
+            <div className="mt-5">
+              <p className="mb-2 text-sm font-semibold text-white">Who plays who first?</p>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["random", "Random draw"],
+                    ["ranking", "Best players kept apart"],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setSeeding(v)}
+                    aria-pressed={seeding === v}
+                    className={cn(
+                      "rounded-full border px-4 py-2 text-sm font-medium",
+                      seeding === v ? "border-[#a78bfa] bg-[#a78bfa]/15 text-white" : "border-white/10 text-mist",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <h2 className="font-display text-2xl font-bold text-white">All set?</h2>
+            <dl className="mt-5 divide-y divide-white/10 rounded-xl border border-white/10 text-sm">
+              <Row k="Name" v={name.trim() || `${me.nickname}'s ${format === "1v1" ? "singles" : "doubles"} tournament`} />
+              <Row k="Game" v={format === "1v1" ? "Singles (1 v 1)" : "Doubles (2 v 2)"} />
+              <Row k={ppt === 1 ? "Players" : "Teams"} v={`${teams.length} added · ${size} places`} />
+              <Row k="How to play" v={formatLine(chosen)} />
+              <Row k="Matches" v={`${describe(chosen, size).totalMatches} — at your own pace`} />
+            </dl>
+            <p className="mt-4 text-sm text-mist">
+              Everyone you added gets an invitation. When enough have accepted, press <strong className="text-white">Start</strong>{" "}
+              on the tournament page and the matches are made for you.
+            </p>
+          </>
+        )}
+
+        {error && (
+          <div className="mt-5">
+            <Notice tone="error">{error}</Notice>
+          </div>
+        )}
+        {step === 1 && teams.length < MIN_TEAMS_TO_START && teams.length > 0 && (
+          <p className="mt-4 text-sm text-mist">Add {MIN_TEAMS_TO_START - teams.length} more to continue.</p>
+        )}
+
+        {/* back / next */}
+        <div className="mt-7 flex items-center gap-3">
+          {step > 0 ? (
+            <button
+              type="button"
+              onClick={() => setStep((s) => s - 1)}
+              className="rounded-full border border-white/15 px-6 py-3 text-sm font-medium text-white hover:border-white/40"
+            >
+              ← Back
+            </button>
+          ) : (
+            <Link href="/play" className="px-2 text-sm text-mist hover:text-white">
+              Cancel
+            </Link>
+          )}
+          {step < STEPS.length - 1 ? (
+            <PrimaryButton className="ml-auto px-8 py-3 text-base" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
+              Next →
+            </PrimaryButton>
+          ) : (
+            <PrimaryButton className="ml-auto px-8 py-3 text-base" disabled={busy || !!formatProblem} onClick={create}>
+              {busy ? "Creating…" : "Create tournament"}
+            </PrimaryButton>
+          )}
         </div>
-      </div>
+      </Card>
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 px-4 py-3 sm:flex-row sm:gap-4">
+      <dt className="w-28 shrink-0 text-mist">{k}</dt>
+      <dd className="text-white">{v}</dd>
     </div>
   );
 }

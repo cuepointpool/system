@@ -56,7 +56,7 @@ export function TournamentDetail({
   }
 
   const [mountNow] = useState(() => Date.now());
-  const future = +new Date(t.startAt) > mountNow;
+  const future = !!t.startAt && +new Date(t.startAt) > mountNow;
   const registeredPlayers = t.registrations
     .filter((r) => r.playerId)
     .map((r) => ({ seed: r.seed, p: players[r.playerId!] }))
@@ -104,7 +104,7 @@ export function TournamentDetail({
           <p className="mt-3 max-w-xl text-sm text-white/80">{t.summary}</p>
 
           <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-4">
-            <HeroFact k="Starts" v={formatDayTime(t.startAt)} />
+            <HeroFact k="Starts" v={t.startAt ? formatDayTime(t.startAt) : "Date to be announced"} />
             <HeroFact k="Venue" v={t.venue} />
             <HeroFact
               k="Prize pool"
@@ -151,9 +151,9 @@ export function TournamentDetail({
                 </span>
                 <Countdown
                   to={
-                    t.status === "registration_open"
+                    (t.status === "registration_open" && t.registrationDeadline
                       ? t.registrationDeadline
-                      : t.startAt
+                      : t.startAt)!
                   }
                   compact
                 />
@@ -177,6 +177,7 @@ export function TournamentDetail({
               bracket={t.bracket}
               players={players}
               championId={t.championId}
+              bestOf={t.bestOf}
             />
           </Panel>
 
@@ -197,10 +198,10 @@ export function TournamentDetail({
           <Panel title="Tournament info">
             <dl className="divide-y divide-white/8 text-sm">
               <Row k="Format" v={FORMAT_LABEL[t.format]} />
-              <Row k="Starts" v={formatDayTime(t.startAt)} />
+              <Row k="Starts" v={t.startAt ? formatDayTime(t.startAt) : "Date to be announced"} />
               <Row
                 k="Registration deadline"
-                v={formatDateShort(t.registrationDeadline)}
+                v={t.registrationDeadline ? formatDateShort(t.registrationDeadline) : "Open until staff close it"}
               />
               <Row k="Players" v={`${count} / ${t.maxPlayers}`} />
               <Row

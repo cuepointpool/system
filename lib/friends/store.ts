@@ -16,7 +16,29 @@ import { randomInt } from "node:crypto";
 import type { PoolClient } from "pg";
 import { query, transaction } from "../pg";
 import { computeStats } from "../ecosystem/store";
-import { generateBracket, nextPow2, roundName } from "./bracket";
+import { RANKING_CONFIG } from "../ecosystem/ranking";
+import { cancelCodeOk, newCancelCode } from "../cancel-code";
+import { roundName } from "./bracket";
+import {
+  blockingTies,
+  computeStandings,
+  cutsFor,
+  groupName,
+  hasPlayoffs,
+  normalizeSettings,
+  planMain,
+  planPlayoffs,
+  validateSettings,
+  bestOfFor,
+  bestOfLabel,
+  checkScore,
+  type BlockingTie,
+  type PlanGame,
+  type Stage,
+  type StandingRow,
+  type TournamentKind,
+  type TournamentSettings,
+} from "./structure";
 import {
   FORMATS,
   isFormat,
@@ -37,6 +59,9 @@ import { CHANNEL } from "./realtime";
 import type {
   BracketRound,
   FriendPointsSummary,
+  PendingTie,
+  StandingView,
+  TournamentSection,
   GameListItem,
   GameStatus,
   GameView,
@@ -90,6 +115,9 @@ const cleanName = (raw: unknown, fallback: string): string => {
   return s || fallback;
 };
 const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
+/** today in Sri Lanka, YYYY-MM-DD */
+const todayIso = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
 const gamePath = (id: string) => `/play/games/${id}`;
 const tournamentPath = (id: string) => `/play/tournaments/${id}`;
 
@@ -129,7 +157,34 @@ interface GameRow {
   created_at: Date;
   started_at: Date | null;
   completed_at: Date | null;
+  stage: Stage;
+  group_no: number | null;
+  label: string | null;
+  loser_next_game_id: string | null;
+  loser_next_slot: "a" | "b" | null;
+  due_date: string | null;
+  best_of: number;
+  score_a: number | null;
+  score_b: number | null;
+  reported_score_a: number | null;
+  reported_score_b: number | null;
+  table_name: string | null;
 }
+
+type Score = { a: number; b: number };
+
+/** the frame score to store for a result; a single-frame match is simply 1–0 */
+function scoreFor(g: GameRow, winner: string, raw?: Score | null): Score {
+  const winnerIsA = winner === g.team_a_id;
+  const bestOf = g.best_of ?? 1;
+  if (bestOf === 1) return winnerIsA ? { a: 1, b: 0 } : { a: 0, b: 1 };
+  if (!raw) throw new FriendsError(400, `This match is ${bestOfLabel(bestOf)} — enter the frame score.`);
+  const problem = checkScore(bestOf, raw.a, raw.b);
+  if (problem) throw new FriendsError(400, problem);
+  if (raw.a > raw.b !== winnerIsA) throw new FriendsError(400, "That score doesn't match the winner.");
+  return { a: raw.a, b: raw.b };
+}
+const scoreText = (g: { best_of: number }, s: Score) => (g.best_of > 1 ? ` ${s.a}–${s.b}` : "");
 
 interface TournamentRow {
   id: string;
@@ -147,7 +202,16 @@ interface TournamentRow {
   created_at: Date;
   started_at: Date | null;
   completed_at: Date | null;
+  kind: TournamentKind;
+  settings: Partial<TournamentSettings>;
+  phase: "main" | "tiebreak" | "playoffs";
+  tiebreaks: { group: number | null; teams: string[] }[];
+  cancel_code_hash: string | null;
+  cancel_code_expires: Date | null;
 }
+
+const settingsOf = (t: Pick<TournamentRow, "kind" | "settings">): TournamentSettings =>
+  normalizeSettings({ ...(t.settings ?? {}), kind: t.kind });
 
 /* -------------------------------------------------------------------- */
 /*  Event batch — notifications + the one NOTIFY per transaction       */
@@ -415,6 +479,8 @@ async function gameViews(
       canConfirm: canAnswer,
       canDispute: canAnswer,
       canSettle: open && !!teamA && !!teamB && (isOrganizer || isMod(actor)),
+      canChange:
+        g.status === "completed" && !g.is_bye && !!teamA && !!teamB && (isOrganizer || isMod(actor)),
       canCancel:
         !inTournament &&
         (isOrganizer || isMod(actor)) &&
@@ -447,8 +513,21 @@ async function gameViews(
         ? { id: g.tournament_id, name: tournamentNames.get(g.tournament_id) ?? "" }
         : null,
       round: g.round,
-      roundName: g.round && total ? roundName(g.round, total) : null,
+      roundName: g.label
+        ? (g.group_no ? `${groupName(g.group_no)} · ` : "") + g.label
+        : g.round && total
+          ? roundName(g.round, total)
+          : null,
       position: g.position,
+      stage: g.tournament_id ? g.stage : null,
+      group: g.group_no,
+      dueDate: g.due_date,
+      bestOf: g.best_of ?? 1,
+      scoreA: g.score_a,
+      scoreB: g.score_b,
+      reportedScoreA: g.reported_score_a,
+      reportedScoreB: g.reported_score_b,
+      tableName: g.table_name,
       isBye: g.is_bye,
       guestMatch: !!teamA?.hasGuest || !!teamB?.hasGuest,
       version: g.version,
@@ -490,26 +569,116 @@ export async function getTournamentView(
   const games = await gameViews(pooled, gameRows, actor, {
     teams: new Map(rawTeams.map((r) => [r.id, r])),
   });
-
-  const totalRounds = games.reduce((m, g) => Math.max(m, g.round ?? 0), 0);
-  const rounds: BracketRound[] = [];
-  for (let r = 1; r <= totalRounds; r++) {
-    rounds.push({
-      round: r,
-      name: roundName(r, totalRounds),
-      games: games.filter((g) => g.round === r),
-    });
-  }
-
+  const view = new Map(games.map((g) => [g.id, g]));
   const byId = new Map(teams.map((x) => [x.id, x]));
-  const champion = t.champion_team_id ? (byId.get(t.champion_team_id) ?? null) : null;
-  const finalGame = games.find((g) => g.round === totalRounds);
-  const runnerUpId =
-    finalGame && finalGame.status === "completed" && finalGame.winnerTeamId
-      ? finalGame.teamA?.id === finalGame.winnerTeamId
-        ? finalGame.teamB?.id
-        : finalGame.teamA?.id
-      : null;
+  const s = settingsOf(t);
+
+  // ---- tables (league / groups) ----
+  const tables = t.status === "registration_open" ? [] : buildTables(t, seedOrderOf(teams), gameRows);
+  const live = (g: GameRow) =>
+    g.status === "waiting_for_players" || g.status === "ready" || g.status === "in_progress";
+
+  // ---- sections: the tabs on the page ----
+  const roundsOf = (rows: GameRow[]): BracketRound[] => {
+    const byRound = new Map<number, GameRow[]>();
+    for (const g of rows) byRound.set(g.round ?? 0, [...(byRound.get(g.round ?? 0) ?? []), g]);
+    const last = Math.max(0, ...rows.map((x) => x.round ?? 0));
+    return [...byRound.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([round, gs]) => ({
+        round,
+        name: gs[0].label ?? roundName(round, last),
+        games: gs
+          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+          .map((g) => view.get(g.id))
+          .filter((g): g is GameView => !!g),
+      }));
+  };
+  const of = (...stages: Stage[]) => gameRows.filter((g) => stages.includes(g.stage));
+  const sections: TournamentSection[] = [];
+  const bracket = (sid: string, title: string, main: GameRow[], third: GameRow[] = []) => {
+    if (!main.length) return;
+    const rounds = roundsOf(main);
+    if (third.length)
+      rounds.push({
+        round: 999,
+        name: "3rd place",
+        games: third.map((g) => view.get(g.id)).filter((g): g is GameView => !!g),
+      });
+    sections.push({ id: sid, title, kind: "bracket", rounds });
+  };
+
+  if (t.kind === "knockout") bracket("bracket", "Bracket", of("knockout"), of("third_place"));
+  if (t.kind === "double_elim") {
+    bracket("upper", "Upper bracket", of("upper"));
+    bracket("lower", "Lower bracket", of("lower"));
+    bracket("final", "Grand final", of("grand_final"));
+  }
+  if (t.kind === "league" || t.kind === "groups") {
+    for (const tb of tables) {
+      const rows = of(t.kind === "league" ? "league" : "group").filter((g) => g.group_no === tb.group);
+      const finished = t.status === "completed" || (rows.length > 0 && !rows.some(live) && t.phase !== "main");
+      const settled = finished && !blockingTies(tb.rows, tb.cuts, tb.group).length;
+      const through = qualifyCount(s, tb.rows.length);
+      sections.push({
+        id: tb.group ? `group-${tb.group}` : "table",
+        title: tb.group ? groupName(tb.group) : "Table",
+        kind: "table",
+        group: tb.group,
+        rows: tb.rows
+          .filter((r) => byId.has(r.teamId))
+          .map((r): StandingView => ({ ...r, team: byId.get(r.teamId)!, through: settled && r.position <= through })),
+        cuts: tb.cuts,
+        cutNote: cutNote(s, tb.rows.length),
+        rounds: roundsOf(rows),
+      });
+    }
+    bracket("playoffs", t.kind === "league" ? "Playoffs" : "Knockout", of("playoff"), of("third_place"));
+  }
+  const deciders = of("decider");
+  if (deciders.length)
+    sections.push({
+      id: "tiebreak",
+      title: "Tie-breakers",
+      kind: "list",
+      games: deciders.map((g) => view.get(g.id)).filter((g): g is GameView => !!g),
+    });
+
+  // ---- ties the tournament is waiting on ----
+  const pendingTies: PendingTie[] =
+    t.status === "in_progress" && t.phase === "tiebreak"
+      ? tables
+          .flatMap((tb) => blockingTies(tb.rows, tb.cuts, tb.group))
+          .map((tie) => {
+            const among = deciders.filter(
+              (g) => tie.teamIds.includes(g.team_a_id ?? "") && tie.teamIds.includes(g.team_b_id ?? ""),
+            );
+            const open = among.filter(live);
+            const rounds = new Set(among.map((g) => g.round)).size;
+            return {
+              group: tie.group,
+              title: tieTitle(tie, s),
+              teams: tie.teamIds.map((x) => byId.get(x)).filter((x): x is TeamView => !!x),
+              matchesLeft: open.length,
+              playoffRound: Math.max(1, rounds),
+            };
+          })
+      : [];
+
+  // ---- the viewer's next match ----
+  const mine = games.filter(
+    (g) => g.viewer.teamId && !g.isBye && (g.status === "ready" || g.status === "in_progress"),
+  );
+  const myNextGame =
+    mine.find((g) => g.viewer.canConfirm) ??
+    mine.find((g) => g.resultStatus === "disputed") ??
+    [...mine].sort(
+      (a, b) => (a.dueDate ?? "9").localeCompare(b.dueDate ?? "9") || (a.round ?? 0) - (b.round ?? 0),
+    )[0] ??
+    null;
+
+  const place = placementsFrom(t, gameRows, tables);
+  const team = (x: string | null) => (x ? (byId.get(x) ?? null) : null);
 
   const open = t.status === "registration_open";
   const viewer: TournamentViewer = {
@@ -521,6 +690,7 @@ export async function getTournamentView(
     canStart: open && isOrganizer,
     canCancel: (open || t.status === "in_progress") && (isOrganizer || isMod(actor)),
     canLeave: open && !!myMember,
+    canEditFormat: open && isOrganizer,
   };
 
   const [org] = [...(await loadPlayerRefs(pooled, [t.organizer_id])).values()];
@@ -541,16 +711,181 @@ export async function getTournamentView(
       0,
     ),
     guests: teams.reduce((n, x) => n + x.members.filter((m) => m.guest).length, 0),
-    rounds,
+    kind: t.kind,
+    settings: s,
+    phase: t.phase,
+    sections,
+    pendingTies,
+    myNextGame,
     byes: games.filter((g) => g.isBye).length,
-    champion,
-    runnerUp: runnerUpId ? (byId.get(runnerUpId) ?? null) : null,
+    champion: team(place.champion),
+    runnerUp: team(place.runnerUp),
+    third: team(place.third),
+    groupWinners: place.groupWinners.flatMap((w) => {
+      const tm = byId.get(w.teamId);
+      return tm ? [{ group: w.group, title: groupName(w.group), team: tm }] : [];
+    }),
     version: t.version,
     createdAt: iso(t.created_at),
     startedAt: isoOrNull(t.started_at),
     completedAt: isoOrNull(t.completed_at),
     viewer,
   };
+}
+
+/* ---------------------- tables, placements (shared) ---------------------- */
+
+interface Table {
+  group: number | null;
+  rows: StandingRow[];
+  cuts: number[];
+}
+
+/** team ids in seed order (unseeded last, in the order they were added) */
+function seedOrderOf(teams: { id: string; seed: number | null }[]): string[] {
+  return teams
+    .map((x, i) => ({ x, i }))
+    .sort((a, b) => (a.x.seed ?? 1e9) - (b.x.seed ?? 1e9) || a.i - b.i)
+    .map(({ x }) => x.id);
+}
+
+type GameLite = Pick<
+  GameRow,
+  | "id" | "stage" | "group_no" | "team_a_id" | "team_b_id" | "winner_team_id" | "status" | "next_game_id" | "is_bye"
+  | "score_a" | "score_b"
+>;
+
+/** the league table, or one table per group, from the finished table matches */
+function buildTables(t: TournamentRow, seedIds: string[], games: GameLite[]): Table[] {
+  if (t.kind !== "league" && t.kind !== "groups") return [];
+  const s = settingsOf(t);
+  const stage: Stage = t.kind === "league" ? "league" : "group";
+  const played = games.filter((g) => g.stage === stage);
+  // play-offs between level players are listed under their group (or the league)
+  const groupNos: (number | null)[] =
+    t.kind === "league"
+      ? [null]
+      : [...new Set(played.map((g) => g.group_no))].sort((a, b) => (a ?? 0) - (b ?? 0));
+  return groupNos.map((group) => {
+    const gs = played.filter((g) => g.group_no === group);
+    const inGroup = new Set(gs.flatMap((g) => [g.team_a_id, g.team_b_id]).filter((x): x is string => !!x));
+    const ids = seedIds.filter((x) => inGroup.has(x));
+    const rows = computeStandings(
+      ids,
+      gs
+        .filter((g) => g.status === "completed")
+        .map((g) => ({ a: g.team_a_id, b: g.team_b_id, winner: g.winner_team_id, scoreA: g.score_a, scoreB: g.score_b })),
+      {
+        tiebreak: s.tiebreak,
+        orders: (t.tiebreaks ?? []).filter((o) => (o.group ?? null) === group).map((o) => o.teams),
+        deciders: games
+          .filter((g) => g.stage === "decider" && g.group_no === group && g.status === "completed")
+          .map((g) => ({ a: g.team_a_id, b: g.team_b_id, winner: g.winner_team_id })),
+      },
+    );
+    return { group, rows, cuts: cutsFor(s, ids.length) };
+  });
+}
+
+/** how many places at the top of a table "go through" */
+function qualifyCount(s: TournamentSettings, size: number): number {
+  if (s.kind === "groups") return s.groupFinish === "knockout" ? s.advance : 1;
+  if (s.finish === "table") return 1;
+  if (s.finish === "final") return s.thirdPlace && size >= 4 ? 4 : 2;
+  return s.finish === "top4" ? 4 : 8;
+}
+
+function cutNote(s: TournamentSettings, size: number): string {
+  if (s.kind === "groups")
+    return s.groupFinish === "knockout"
+      ? `Top ${s.advance} go through to the knockout`
+      : "The group winner takes the group";
+  if (s.finish === "table") return "Top of the table wins";
+  if (s.finish === "final")
+    return s.thirdPlace && size >= 4
+      ? "1st v 2nd in the final · 3rd v 4th for 3rd place"
+      : "1st v 2nd in the final";
+  return s.finish === "top4" ? "Top 4 go to the semi finals" : "Top 8 go to the quarter finals";
+}
+
+function tieTitle(tie: BlockingTie, s: TournamentSettings): string {
+  const where = tie.group ? `${groupName(tie.group)}: ` : "";
+  const what =
+    s.kind === "groups"
+      ? s.groupFinish === "knockout"
+        ? `the last place through (top ${tie.cut})`
+        : "the group win"
+      : s.finish === "table"
+        ? "1st place"
+        : tie.cut === 2
+          ? "a place in the final"
+          : tie.cut === 4 && s.finish === "final"
+            ? "the 3rd-place match"
+            : `a place in the top ${tie.cut}`;
+  return `${where}${tie.teamIds.length} level on points for ${what}`;
+}
+
+interface Placements {
+  champion: string | null;
+  runnerUp: string | null;
+  third: string | null;
+  /** semi-final losers (or the nearest equivalent) — they earn semi-finalist points */
+  semis: string[];
+  groupWinners: { group: number; teamId: string }[];
+}
+
+function placementsFrom(t: TournamentRow, games: GameLite[], tables: Table[]): Placements {
+  const s = settingsOf(t);
+  const none: Placements = { champion: null, runnerUp: null, third: null, semis: [], groupWinners: [] };
+  const loserOf = (g: GameLite) => (g.winner_team_id === g.team_a_id ? g.team_b_id : g.team_a_id);
+  const done = (g: GameLite) => g.status === "completed" && !!g.winner_team_id;
+
+  if (t.kind === "league" && s.finish === "table") {
+    if (t.status !== "completed") return none;
+    const r = tables[0]?.rows ?? [];
+    return {
+      ...none,
+      champion: r[0]?.teamId ?? null,
+      runnerUp: r[1]?.teamId ?? null,
+      third: r[2]?.teamId ?? null,
+      semis: r[2] ? [r[2].teamId] : [],
+    };
+  }
+  if (t.kind === "groups" && s.groupFinish === "none") {
+    if (t.status !== "completed") return none;
+    return {
+      ...none,
+      groupWinners: tables
+        .filter((x) => x.rows[0])
+        .map((x) => ({ group: x.group ?? 1, teamId: x.rows[0].teamId })),
+    };
+  }
+  const finalStage: Stage =
+    t.kind === "knockout" ? "knockout" : t.kind === "double_elim" ? "grand_final" : "playoff";
+  const fin = games.find((g) => g.stage === finalStage && !g.next_game_id && !g.is_bye);
+  const thirdGame = games.find((g) => g.stage === "third_place");
+  const out: Placements = { ...none };
+  if (fin && done(fin)) {
+    out.champion = fin.winner_team_id;
+    out.runnerUp = loserOf(fin);
+  }
+  if (thirdGame && done(thirdGame)) out.third = thirdGame.winner_team_id;
+  if (t.kind === "double_elim") {
+    const lowerFinal = games.find((g) => g.stage === "lower" && !!fin && g.next_game_id === fin.id);
+    if (lowerFinal && done(lowerFinal)) {
+      const l = loserOf(lowerFinal);
+      out.third = l;
+      out.semis = l ? [l] : [];
+    }
+  } else if (fin) {
+    out.semis = games
+      .filter((g) => g.next_game_id === fin.id && !g.is_bye && done(g))
+      .map(loserOf)
+      .filter((x): x is string => !!x);
+    if (!out.semis.length && thirdGame && done(thirdGame))
+      out.semis = [thirdGame.team_a_id, thirdGame.team_b_id].filter((x): x is string => !!x);
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------------- */
@@ -670,7 +1005,7 @@ export async function listMyPlay(actor: Actor): Promise<MyPlay> {
             ON m.player_id = $1 AND m.tournament_id = t.id
            AND m.status = 'accepted' AND m.team_id IN (g.team_a_id, g.team_b_id)
          WHERE g.tournament_id = t.id AND g.status IN ('ready','in_progress')
-         ORDER BY g.round LIMIT 1) AS next_game_id
+         ORDER BY g.due_date NULLS LAST, g.round LIMIT 1) AS next_game_id
        FROM friend_tournaments t
       WHERE t.organizer_id = $1
          OR EXISTS (SELECT 1 FROM friend_team_members m
@@ -684,6 +1019,7 @@ export async function listMyPlay(actor: Actor): Promise<MyPlay> {
     id: t.id,
     name: t.name,
     format: t.format,
+    kind: t.kind,
     status: t.status,
     capacityTeams: t.capacity_teams,
     teams: t.teams,
@@ -889,6 +1225,62 @@ async function teamPlayerIds(c: PoolClient, teamId: string | null): Promise<stri
     [teamId],
   );
   return rows.map((r) => r.player_id);
+}
+
+/**
+ * The Cue Point in-house leaderboard counts friends play too — but only a
+ * finished 1v1 between two REGISTERED players. A guest on either side, a 2v2,
+ * a BYE, or a game over the daily anti-farming limit never moves it.
+ * Idempotent: it rewrites this game's single entry in `matches` (or removes
+ * it), so a changed or undone result is reflected straight away.
+ */
+async function syncInhouseMatch(c: PoolClient, gameId: string) {
+  await c.query(`DELETE FROM matches WHERE friend_game_id = $1`, [gameId]);
+  const [g] = (
+    await c.query<GameRow & { t_eligible: boolean | null; t_name: string | null }>(
+      `SELECT g.*, t.points_eligible AS t_eligible, t.name AS t_name
+         FROM friend_games g LEFT JOIN friend_tournaments t ON t.id = g.tournament_id
+        WHERE g.id = $1`,
+      [gameId],
+    )
+  ).rows;
+  if (!g || g.status !== "completed" || g.is_bye || !g.winner_team_id || g.players_per_team !== 1) return;
+  if (!(g.tournament_id ? g.t_eligible : g.points_awarded)) return;
+  if ((await teamHasGuest(c, g.team_a_id)) || (await teamHasGuest(c, g.team_b_id))) return;
+  const [a] = await teamPlayerIds(c, g.team_a_id);
+  const [b] = await teamPlayerIds(c, g.team_b_id);
+  if (!a || !b || a === b) return;
+  const players = await inTx(c)<{ id: string }>(
+    `SELECT id FROM player_profiles WHERE id = ANY($1) AND role = 'player'`,
+    [[a, b]],
+  );
+  if (players.length !== 2) return; // staff accounts don't rank
+  const winner = g.winner_team_id === g.team_a_id ? a : b;
+  const { stats } = await computeStats();
+  const pa = stats.get(a)?.rankingPoints ?? RANKING_CONFIG.startPoints;
+  const pb = stats.get(b)?.rankingPoints ?? RANKING_CONFIG.startPoints;
+  await c.query(
+    `INSERT INTO matches
+       (id, ref, type, player_a_id, player_b_id, score_a, score_b, winner_id, table_name,
+        tournament_round, played_at, a_points_before, a_points_after, b_points_before, b_points_after,
+        recorded_by, friend_game_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Friends play',$9,$10,$11,$11,$12,$12,'friends',$13)`,
+    [
+      nid("m"),
+      "CP-F-" + globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase(),
+      g.tournament_id ? "ranked" : "casual",
+      a,
+      b,
+      g.score_a ?? (winner === a ? 1 : 0),
+      g.score_b ?? (winner === b ? 1 : 0),
+      winner,
+      g.tournament_id ? `${g.t_name ?? "Friends tournament"} · ${g.label ?? "match"}` : null,
+      g.completed_at ?? new Date(),
+      pa,
+      pb,
+      g.id,
+    ],
+  );
 }
 
 /** Flip a casual game between waiting_for_players and ready, from the seats. */
@@ -1155,16 +1547,42 @@ export async function removePlayerFromGame(gameId: string, actor: Actor, playerI
   });
 }
 
-export async function startGame(gameId: string, actor: Actor) {
+/**
+ * Start a match. Matches run in parallel — any number at once on different
+ * tables; `tableName` (optional) notes which table this one is on. The one
+ * rule: a player can't be in two running matches of the same tournament.
+ */
+export async function startGame(gameId: string, actor: Actor, tableName?: string | null) {
   await transaction(async (c) => {
     const g = await lockGame(c, gameId);
     const involved = !!(await mySide(c, g, actor.id)) || g.organizer_id === actor.id || isMod(actor);
     if (!involved) throw new FriendsError(403, "Only the players can start this game.");
     if (g.status !== "ready")
       throw new FriendsError(409, "Everyone has to accept before the game can start.");
+    if (g.tournament_id) {
+      // an entry (player or team, guests included) can only be at one table at a time
+      const sides = [g.team_a_id, g.team_b_id].filter((x): x is string => !!x);
+      const [busy] = await inTx(c)<{ team: string; label: string | null; table_name: string | null }>(
+        `SELECT CASE WHEN og.team_a_id = ANY($3) THEN og.team_a_id ELSE og.team_b_id END AS team,
+                og.label, og.table_name
+           FROM friend_games og
+          WHERE og.tournament_id = $1 AND og.status = 'in_progress' AND og.id <> $2
+            AND (og.team_a_id = ANY($3) OR og.team_b_id = ANY($3))
+          LIMIT 1`,
+        [g.tournament_id, g.id, sides],
+      );
+      if (busy) {
+        const where = busy.table_name ?? busy.label;
+        throw new FriendsError(
+          409,
+          `${await teamName(c, busy.team)} ${g.players_per_team > 1 ? "are" : "is"} still playing another match${where ? ` (${where})` : ""}. Finish that one first.`,
+        );
+      }
+    }
+    const table = typeof tableName === "string" ? tableName.replace(/\s+/g, " ").trim().slice(0, 40) || null : null;
     await c.query(
-      `UPDATE friend_games SET status = 'in_progress', started_at = now() WHERE id = $1`,
-      [gameId],
+      `UPDATE friend_games SET status = 'in_progress', started_at = now(), table_name = $2 WHERE id = $1`,
+      [gameId, table],
     );
     await bumpGame(c, gameId);
     const batch = new Batch(c);
@@ -1176,7 +1594,7 @@ export async function startGame(gameId: string, actor: Actor) {
         await batch.notify(
           pid,
           "game_started",
-          `${g.name} has started.`,
+          `${g.name} has started${table ? ` on ${table}` : ""}.`,
           g.tournament_id ? tournamentPath(g.tournament_id) : gamePath(gameId),
         );
     await touchGame(c, batch, g);
@@ -1207,7 +1625,12 @@ export async function cancelGame(gameId: string, actor: Actor) {
 /* ---------------------------- results ---------------------------- */
 
 /** one player reports who won; the other side confirms */
-export async function reportResult(gameId: string, actor: Actor, winnerTeamId: string) {
+export async function reportResult(
+  gameId: string,
+  actor: Actor,
+  winnerTeamId: string,
+  score?: Score | null,
+) {
   await transaction(async (c) => {
     const g = await lockGame(c, gameId);
     if (g.status !== "ready" && g.status !== "in_progress")
@@ -1219,21 +1642,23 @@ export async function reportResult(gameId: string, actor: Actor, winnerTeamId: s
     if (!mine) throw new FriendsError(403, "Only the players in this game can report the result.");
     if (winnerTeamId !== g.team_a_id && winnerTeamId !== g.team_b_id)
       throw new FriendsError(400, "Pick one of the two sides as the winner.");
+    const sc = scoreFor(g, winnerTeamId, score);
 
     // the other side is all guests: nobody there has an account to confirm
     // with, so the report stands (no points ride on a guest match anyway)
     const opposing = mine === g.team_a_id ? g.team_b_id : g.team_a_id;
     if ((await teamPlayerIds(c, opposing)).length === 0) {
-      await finalizeGame(c, g, winnerTeamId);
+      await finalizeGame(c, g, winnerTeamId, sc);
       return;
     }
 
     await c.query(
       `UPDATE friend_games
           SET result_status = 'reported', reported_winner_team_id = $2, reported_by = $3,
+              reported_score_a = $4, reported_score_b = $5,
               status = 'in_progress', started_at = COALESCE(started_at, now())
         WHERE id = $1`,
-      [gameId, winnerTeamId, actor.id],
+      [gameId, winnerTeamId, actor.id, sc.a, sc.b],
     );
     await bumpGame(c, gameId);
     const batch = new Batch(c);
@@ -1244,7 +1669,7 @@ export async function reportResult(gameId: string, actor: Actor, winnerTeamId: s
       await batch.notify(
         pid,
         "result_reported",
-        `${actor.nickname} says ${winName} won ${g.name}. Please confirm or dispute.`,
+        `${actor.nickname} says ${winName} won ${g.name}${scoreText(g, sc)}. Please confirm or dispute.`,
         href,
       );
     await touchGame(c, batch, g);
@@ -1262,7 +1687,14 @@ export async function confirmResult(gameId: string, actor: Actor) {
     const reporterSide = g.reported_by ? await mySide(c, g, g.reported_by) : null;
     if (!mine || mine === reporterSide)
       throw new FriendsError(403, "The opposing side has to confirm the result.");
-    await finalizeGame(c, g, g.reported_winner_team_id);
+    await finalizeGame(
+      c,
+      g,
+      g.reported_winner_team_id,
+      g.reported_score_a != null && g.reported_score_b != null
+        ? { a: g.reported_score_a, b: g.reported_score_b }
+        : null,
+    );
   });
 }
 
@@ -1277,7 +1709,8 @@ export async function disputeResult(gameId: string, actor: Actor) {
       throw new FriendsError(403, "Only the opposing side can dispute the result.");
     await c.query(
       `UPDATE friend_games
-          SET result_status = 'disputed', reported_winner_team_id = NULL
+          SET result_status = 'disputed', reported_winner_team_id = NULL,
+              reported_score_a = NULL, reported_score_b = NULL
         WHERE id = $1`,
       [gameId],
     );
@@ -1301,19 +1734,230 @@ export async function disputeResult(gameId: string, actor: Actor) {
   });
 }
 
-/** organizer (or staff) sets the winner outright — e.g. to settle a dispute */
-export async function settleResult(gameId: string, actor: Actor, winnerTeamId: string) {
+/**
+ * The organizer (or staff) marks the winner. Final at once — nobody has to
+ * confirm. On a match that's already finished this CHANGES the result, and
+ * everything that followed from it is corrected (see correctResult).
+ */
+export async function settleResult(
+  gameId: string,
+  actor: Actor,
+  winnerTeamId: string,
+  score?: Score | null,
+) {
   await transaction(async (c) => {
     const g = await lockGame(c, gameId);
     if (g.organizer_id !== actor.id && !isMod(actor))
-      throw new FriendsError(403, "Only the organizer can settle a result.");
-    if (g.status !== "ready" && g.status !== "in_progress")
-      throw new FriendsError(409, "This game isn't in play.");
+      throw new FriendsError(403, "Only the organizer can set or change a result.");
     if (g.is_bye) throw new FriendsError(400, "A BYE has no result.");
     if (winnerTeamId !== g.team_a_id && winnerTeamId !== g.team_b_id)
       throw new FriendsError(400, "Pick one of the two sides as the winner.");
-    await finalizeGame(c, g, winnerTeamId);
+    const sc = scoreFor(g, winnerTeamId, score);
+    if (g.status === "completed") {
+      if (g.winner_team_id === winnerTeamId) {
+        if (g.score_a === sc.a && g.score_b === sc.b) return;
+        // same winner, different scoreline — nothing moves but the score
+        await c.query(`UPDATE friend_games SET score_a = $2, score_b = $3 WHERE id = $1`, [g.id, sc.a, sc.b]);
+        await syncInhouseMatch(c, g.id);
+        const batch = new Batch(c);
+        await bumpGame(c, g.id);
+        if (g.tournament_id) await bumpTournament(c, g.tournament_id);
+        await touchGame(c, batch, g);
+        await batch.flush();
+        return;
+      }
+      await correctResult(c, g, winnerTeamId, actor, sc);
+      return;
+    }
+    if (g.status !== "ready" && g.status !== "in_progress")
+      throw new FriendsError(409, "This game isn't in play.");
+    await finalizeGame(c, g, winnerTeamId, sc);
   });
+}
+
+/** organizer: take a finished match back to "not played yet" */
+export async function undoResult(gameId: string, actor: Actor) {
+  await transaction(async (c) => {
+    const g = await lockGame(c, gameId);
+    if (g.organizer_id !== actor.id && !isMod(actor))
+      throw new FriendsError(403, "Only the organizer can undo a result.");
+    if (g.is_bye) throw new FriendsError(400, "A BYE has no result.");
+    if (g.status !== "completed" || !g.winner_team_id)
+      throw new FriendsError(409, "This match has no result to undo.");
+    await correctResult(c, g, null, actor);
+  });
+}
+
+/**
+ * Change (winner = the other side) or clear (winner = null) a finished
+ * result, and repair what it fed into:
+ *  · the next match / lower-bracket match get the right team (or none yet)
+ *  · a league / group result after the table was settled rewinds the
+ *    playoffs or tie-breakers — as long as none of those has been played
+ *  · a finished tournament reopens; placement points are taken back and
+ *    paid again when it finishes
+ *  · this match's own points move to the right players
+ * If a later match was already played with the old result, that one must be
+ * undone first — we never guess how a match that didn't happen would have gone.
+ */
+async function correctResult(
+  c: PoolClient,
+  g: GameRow,
+  winner: string | null,
+  actor: Actor,
+  score: Score | null = null,
+) {
+  const sc = winner ? (score ?? scoreFor(g, winner)) : null;
+  const newLoser = winner ? (winner === g.team_a_id ? g.team_b_id : g.team_a_id) : null;
+  const batch = new Batch(c);
+  const href = g.tournament_id ? tournamentPath(g.tournament_id) : gamePath(g.id);
+  const label = g.label ?? (g.tournament_id ? "match" : g.name);
+
+  if (!g.tournament_id) {
+    // ---- casual game: move the points ----
+    await c.query(
+      `DELETE FROM friend_points WHERE game_id = $1 AND reason IN ('game_win','game_loss')`,
+      [g.id],
+    );
+    if (winner) {
+      await c.query(`UPDATE friend_games SET winner_team_id = $2, score_a = $3, score_b = $4 WHERE id = $1`, [
+        g.id,
+        winner,
+        sc!.a,
+        sc!.b,
+      ]);
+      if (g.points_awarded) {
+        await addPoints(c, await teamPlayerIds(c, winner), FRIEND_POINTS.gameWin, "game_win", { gameId: g.id });
+        await addPoints(c, await teamPlayerIds(c, newLoser), FRIEND_POINTS.gameLoss, "game_loss", { gameId: g.id });
+      }
+    } else {
+      await c.query(
+        `UPDATE friend_games
+            SET status = 'in_progress', winner_team_id = NULL, completed_at = NULL,
+                score_a = NULL, score_b = NULL, reported_score_a = NULL, reported_score_b = NULL,
+                result_status = 'none', reported_winner_team_id = NULL, points_awarded = false
+          WHERE id = $1`,
+        [g.id],
+      );
+    }
+    await syncInhouseMatch(c, g.id);
+    const msg = winner
+      ? `${actor.nickname} changed the result of ${g.name}: ${await teamName(c, winner)} won.`
+      : `${actor.nickname} took back the result of ${g.name} — it's open again.`;
+    for (const pid of await playersOfGame(c, g.id)) if (pid !== actor.id) await batch.notify(pid, "result_changed", msg, href);
+    await bumpGame(c, g.id);
+    await touchGame(c, batch, g);
+    await batch.flush();
+    return;
+  }
+
+  // ---- tournament match ----
+  const t = await lockTournament(c, g.tournament_id);
+  if (t.status === "cancelled") throw new FriendsError(409, "This tournament was cancelled.");
+  const all = (await c.query<GameRow>(`SELECT * FROM friend_games WHERE tournament_id = $1`, [t.id])).rows;
+  const byId = new Map(all.map((x) => [x.id, x]));
+  const where = (x: GameRow) => (x.group_no ? `${groupName(x.group_no)} · ` : "") + (x.label ?? "the next match");
+
+  // later matches this one fed must not have been played yet
+  for (const nextId of [g.next_game_id, g.loser_next_game_id]) {
+    const nx = nextId ? byId.get(nextId) : null;
+    if (nx && nx.status === "completed")
+      throw new FriendsError(
+        409,
+        `${where(nx)} has already been played using this result. Undo that match first, then change this one.`,
+      );
+  }
+
+  // a table result after the table was settled: rewind the second stage
+  const tableMatch = g.stage === "league" || g.stage === "group";
+  if (tableMatch && t.phase !== "main") {
+    const later = all.filter((x) => ["playoff", "third_place", "decider"].includes(x.stage));
+    const played = later.find((x) => x.status === "completed" && !x.is_bye);
+    if (played)
+      throw new FriendsError(
+        409,
+        `The ${played.stage === "decider" ? "tie-breaker" : "playoffs"} already started (${where(played)}). Undo those results first.`,
+      );
+    if (later.length) await c.query(`DELETE FROM friend_games WHERE id = ANY($1)`, [later.map((x) => x.id)]);
+    await c.query(`UPDATE friend_tournaments SET phase = 'main', tiebreaks = '[]'::jsonb WHERE id = $1`, [t.id]);
+  }
+
+  // a finished tournament opens again; its placement points are paid again at the end
+  if (t.status === "completed") {
+    await c.query(
+      `UPDATE friend_tournaments SET status = 'in_progress', champion_team_id = NULL, completed_at = NULL WHERE id = $1`,
+      [t.id],
+    );
+    await c.query(
+      `DELETE FROM friend_points WHERE tournament_id = $1 AND reason IN ('champion','runner_up','semi_finalist')`,
+      [t.id],
+    );
+  }
+
+  // the match itself
+  if (winner) {
+    await c.query(`UPDATE friend_games SET winner_team_id = $2, score_a = $3, score_b = $4 WHERE id = $1`, [
+      g.id,
+      winner,
+      sc!.a,
+      sc!.b,
+    ]);
+  } else {
+    await c.query(
+      `UPDATE friend_games
+          SET status = 'ready', winner_team_id = NULL, completed_at = NULL,
+              score_a = NULL, score_b = NULL, reported_score_a = NULL, reported_score_b = NULL,
+              result_status = 'none', reported_winner_team_id = NULL, reported_by = NULL
+        WHERE id = $1`,
+      [g.id],
+    );
+  }
+
+  await syncInhouseMatch(c, g.id);
+
+  // what it fed: put the right team in (or empty the slot again)
+  const live: TournamentRow = { ...t, status: "in_progress" };
+  const reslot = async (nextId: string | null, slot: "a" | "b" | null, team: string | null) => {
+    if (!nextId || !slot) return;
+    const col = slot === "a" ? "team_a_id" : "team_b_id";
+    // anything reported for the next match was about the old line-up
+    await c.query(
+      `UPDATE friend_games SET ${col} = NULL, status = 'waiting_for_players',
+              result_status = 'none', reported_winner_team_id = NULL, reported_by = NULL,
+              reported_score_a = NULL, reported_score_b = NULL,
+              started_at = NULL, version = version + 1
+        WHERE id = $1`,
+      [nextId],
+    );
+    if (team) await fillSlot(c, batch, nextId, slot, team, live);
+  };
+  await reslot(g.next_game_id, g.next_slot, winner);
+  await reslot(g.loser_next_game_id, g.loser_next_slot, newLoser);
+
+  // this match's own points follow the result
+  await c.query(`DELETE FROM friend_points WHERE game_id = $1 AND reason = 'match_win'`, [g.id]);
+  if (winner && t.points_eligible) {
+    const guest = (await teamHasGuest(c, winner)) || (await teamHasGuest(c, newLoser));
+    if (!guest) {
+      const amount = tableMatch ? FRIEND_POINTS.leagueMatchWin : FRIEND_POINTS.tournamentMatchWin;
+      await addPoints(c, await teamPlayerIds(c, winner), amount, "match_win", { gameId: g.id, tournamentId: t.id });
+    }
+  }
+
+  const players = uniq([
+    ...(await teamPlayerIds(c, g.team_a_id)),
+    ...(await teamPlayerIds(c, g.team_b_id)),
+  ]);
+  const msg = winner
+    ? `${actor.nickname} changed the result of your ${label} match in ${t.name}: ${await teamName(c, winner)} won.`
+    : `${actor.nickname} took back the result of your ${label} match in ${t.name} — it's open again.`;
+  for (const pid of players) if (pid !== actor.id) await batch.notify(pid, "result_changed", msg, href);
+
+  await progress(c, await lockTournament(c, t.id), batch);
+  await bumpGame(c, g.id);
+  await bumpTournament(c, t.id);
+  await touchTournament(c, batch, t.id);
+  await batch.flush();
 }
 
 /** which side (team id) of this game is the player on, if they've accepted */
@@ -1347,7 +1991,8 @@ async function addPoints(
 }
 
 /** lock in a result: store it, award points, advance the bracket, tell everyone */
-async function finalizeGame(c: PoolClient, g: GameRow, winnerTeamId: string) {
+async function finalizeGame(c: PoolClient, g: GameRow, winnerTeamId: string, score?: Score | null) {
+  const sc = scoreFor(g, winnerTeamId, score);
   const loserTeamId = winnerTeamId === g.team_a_id ? g.team_b_id : g.team_a_id;
   const winners = await teamPlayerIds(c, winnerTeamId);
   const losers = await teamPlayerIds(c, loserTeamId);
@@ -1360,9 +2005,10 @@ async function finalizeGame(c: PoolClient, g: GameRow, winnerTeamId: string) {
     `UPDATE friend_games
         SET status = 'completed', winner_team_id = $2, result_status = 'none',
             reported_winner_team_id = NULL, completed_at = now(),
+            score_a = $3, score_b = $4, reported_score_a = NULL, reported_score_b = NULL,
             started_at = COALESCE(started_at, now())
       WHERE id = $1`,
-    [g.id, winnerTeamId],
+    [g.id, winnerTeamId, sc.a, sc.b],
   );
 
   if (!g.tournament_id) {
@@ -1386,6 +2032,7 @@ async function finalizeGame(c: PoolClient, g: GameRow, winnerTeamId: string) {
       await addPoints(c, winners, pointsForWinner, "game_win", { gameId: g.id });
       await addPoints(c, losers, pointsForLoser, "game_loss", { gameId: g.id });
     }
+    await syncInhouseMatch(c, g.id);
     for (const pid of uniq([...winners, ...losers]))
       await batch.notify(
         pid,
@@ -1404,75 +2051,250 @@ async function finalizeGame(c: PoolClient, g: GameRow, winnerTeamId: string) {
 
   // ---- tournament match ----
   const t = await lockTournament(c, g.tournament_id);
-  const [{ rounds }] = await inTx(c)<{ rounds: number }>(
-    `SELECT max(round)::int AS rounds FROM friend_games WHERE tournament_id = $1`,
-    [t.id],
-  );
-  const isFinal = g.round === rounds;
-  const isSemi = !isFinal && g.round === rounds - 1;
   const href = tournamentPath(t.id);
+  let label = g.label;
+  if (!label) {
+    const [{ rounds }] = await inTx(c)<{ rounds: number }>(
+      `SELECT max(round)::int AS rounds FROM friend_games WHERE tournament_id = $1`,
+      [t.id],
+    );
+    label = g.round ? roundName(g.round, rounds) : "match";
+  }
+  const where = (g.group_no ? `${groupName(g.group_no)} · ` : "") + label;
 
-  // Guests keep the ledger honest: a match with a guest on either side pays
-  // nothing, and a tournament with any guest in it pays no placement points.
+  // Guests keep the ledger honest: a match with a guest on either side pays nothing.
   const guestMatch =
     (await teamHasGuest(c, winnerTeamId)) || (await teamHasGuest(c, loserTeamId));
-  const [{ n: guestsInTournament }] = await inTx(c)<{ n: number }>(
-    `SELECT count(*)::int AS n FROM friend_team_guests WHERE tournament_id = $1`,
-    [t.id],
-  );
-
   if (t.points_eligible && !guestMatch) {
-    await addPoints(c, winners, FRIEND_POINTS.tournamentMatchWin, "match_win", {
-      gameId: g.id,
-      tournamentId: t.id,
-    });
-  }
-  if (t.points_eligible && guestsInTournament === 0) {
-    if (isFinal) {
-      await addPoints(c, winners, FRIEND_POINTS.champion, "champion", { tournamentId: t.id });
-      await addPoints(c, losers, FRIEND_POINTS.runnerUp, "runner_up", { tournamentId: t.id });
-    } else if (isSemi) {
-      await addPoints(c, losers, FRIEND_POINTS.semiFinalist, "semi_finalist", { tournamentId: t.id });
-    }
+    const table = g.stage === "league" || g.stage === "group";
+    await addPoints(
+      c,
+      winners,
+      table ? FRIEND_POINTS.leagueMatchWin : FRIEND_POINTS.tournamentMatchWin,
+      "match_win",
+      { gameId: g.id, tournamentId: t.id },
+    );
   }
 
-  const label = g.round ? roundName(g.round, rounds) : "match";
+  const advances = !!g.next_game_id;
+  const dropsDown = !!g.loser_next_game_id;
   for (const pid of winners)
     await batch.notify(
       pid,
-      isFinal ? "tournament_won" : "match_won",
-      isFinal
-        ? `You won ${t.name}! Champions: ${winName}.`
-        : `You won your ${label.toLowerCase()} in ${t.name} and advance.`,
+      "match_won",
+      advances
+        ? `You won your ${where} match in ${t.name} and go through.`
+        : `You won your ${where} match in ${t.name}.`,
       href,
     );
   for (const pid of losers)
     await batch.notify(
       pid,
       "match_lost",
-      isFinal
-        ? `${winName} won ${t.name}. You finished as runner-up.`
-        : `${winName} won your ${label.toLowerCase()} in ${t.name}.`,
+      dropsDown
+        ? `${winName} won your ${where} match in ${t.name}. You drop into the lower bracket — still alive.`
+        : `${winName} won your ${where} match in ${t.name}.`,
       href,
     );
 
-  if (g.next_game_id && g.next_slot) {
+  await syncInhouseMatch(c, g.id);
+  if (g.next_game_id && g.next_slot)
     await fillSlot(c, batch, g.next_game_id, g.next_slot, winnerTeamId, t);
-  } else {
-    await c.query(
-      `UPDATE friend_tournaments
-          SET status = 'completed', champion_team_id = $2, completed_at = now()
-        WHERE id = $1`,
-      [t.id, winnerTeamId],
-    );
-    for (const pid of await playersOfTournament(c, t.id))
-      if (!winners.includes(pid) && !losers.includes(pid))
-        await batch.notify(pid, "tournament_done", `${t.name} is over. ${winName} are the champions.`, href);
-  }
+  if (g.loser_next_game_id && g.loser_next_slot && loserTeamId)
+    await fillSlot(c, batch, g.loser_next_game_id, g.loser_next_slot, loserTeamId, t);
+
+  await progress(c, await lockTournament(c, t.id), batch);
   await bumpGame(c, g.id);
   await bumpTournament(c, t.id);
   await touchTournament(c, batch, t.id);
   await batch.flush();
+}
+
+/* ------------------------ stage transitions ------------------------ */
+
+/**
+ * Run after every result (and after an organizer breaks a tie). Once nothing
+ * is left to play in the current stage it moves the tournament on: tie-break
+ * deciders, then playoffs, then completion. Safe to call any time — it does
+ * nothing while matches are still open.
+ */
+async function progress(c: PoolClient, t: TournamentRow, batch: Batch) {
+  if (t.status !== "in_progress") return;
+  const games = (
+    await c.query<GameRow>(`SELECT * FROM friend_games WHERE tournament_id = $1`, [t.id])
+  ).rows;
+  const open = (g: GameRow) =>
+    g.status === "waiting_for_players" || g.status === "ready" || g.status === "in_progress";
+  if (games.some(open)) return;
+
+  const s = settingsOf(t);
+  const href = tournamentPath(t.id);
+  if ((t.kind === "league" || t.kind === "groups") && t.phase !== "playoffs") {
+    const teams = await inTx(c)<{ id: string; seed: number | null }>(
+      `SELECT id, seed FROM friend_teams WHERE tournament_id = $1 ORDER BY created_at, id`,
+      [t.id],
+    );
+    const tables = buildTables(t, seedOrderOf(teams), games);
+    const ties = tables.flatMap((tb) => blockingTies(tb.rows, tb.cuts, tb.group));
+
+    if (ties.length) {
+      await c.query(`UPDATE friend_tournaments SET phase = 'tiebreak' WHERE id = $1`, [t.id]);
+      let round =
+        Math.max(0, ...games.filter((g) => g.stage === "decider").map((g) => g.round ?? 0)) + 1;
+      // Level players settle it at the table: a play-off where each plays each
+      // other once (two players = one rematch). If they come out level again,
+      // the next progress() call simply creates another play-off round.
+      const tieBestOf = bestOfFor(s, { stage: "decider", label: "Tie-breaker" });
+      for (const tie of ties) {
+        const names: string[] = [];
+        for (const x of tie.teamIds) names.push(await teamName(c, x));
+        const thisRound = round++;
+        const pairs: [string, string][] = [];
+        for (let i = 0; i < tie.teamIds.length; i++)
+          for (let j = i + 1; j < tie.teamIds.length; j++) pairs.push([tie.teamIds[i], tie.teamIds[j]]);
+        for (const [position, [a, b]] of pairs.entries()) {
+          await c.query(
+            `INSERT INTO friend_games
+               (id, name, organizer_id, format, players_per_team, status, tournament_id, round,
+                position, team_a_id, team_b_id, stage, group_no, label, best_of)
+             VALUES ($1,$2,$3,$4,$5,'ready',$6,$7,$8,$9,$10,'decider',$11,'Tie-breaker',$12)`,
+            [nid("fg"), `${t.name} — Tie-breaker`, t.organizer_id, t.format, t.players_per_team,
+             t.id, thisRound, position, a, b, tie.group, tieBestOf],
+          );
+        }
+        const again = games.some(
+          (g) => g.stage === "decider" && tie.teamIds.includes(g.team_a_id ?? "") && tie.teamIds.includes(g.team_b_id ?? ""),
+        );
+        const how =
+          pairs.length === 1
+            ? "A rematch decides it"
+            : `Play-off: each of you plays the others once (${pairs.length} matches)`;
+        for (const x of tie.teamIds)
+          for (const pid of await teamPlayerIds(c, x))
+            await batch.notify(
+              pid,
+              "match_ready",
+              `${names.join(", ")} ${again ? "are still level" : "finished level on points"} in ${t.name}. ${how} — play your tie-breaker${pairs.length > 1 ? "s" : ""}.`,
+              href,
+            );
+      }
+      return;
+    }
+
+    if (hasPlayoffs(s)) {
+      const plan = planPlayoffs(s, tables.map((tb) => tb.rows.map((r) => r.teamId)));
+      await c.query(`UPDATE friend_tournaments SET phase = 'playoffs' WHERE id = $1`, [t.id]);
+      await insertPlan(c, { ...t, phase: "playoffs" }, plan, batch);
+      const through = new Set(plan.flatMap((g) => [g.a, g.b]).filter((x): x is string => !!x));
+      for (const pid of uniq(await playersOfTournament(c, t.id))) {
+        const mine = await inTx(c)<{ team_id: string }>(
+          `SELECT team_id FROM friend_team_members WHERE tournament_id = $1 AND player_id = $2`,
+          [t.id, pid],
+        );
+        const inIt = mine.some((m) => through.has(m.team_id));
+        await batch.notify(
+          pid,
+          "playoffs_set",
+          inIt
+            ? `You made the ${t.kind === "league" ? "playoffs" : "knockout"} in ${t.name}! Your next match is ready.`
+            : `The ${t.kind === "league" ? "playoffs" : "knockout"} in ${t.name} are set.`,
+          href,
+        );
+      }
+      return;
+    }
+  }
+  await completeTournament(c, t, games, batch);
+}
+
+/** everything is played: record the winner, pay placement points, tell everyone */
+async function completeTournament(c: PoolClient, t: TournamentRow, games: GameRow[], batch: Batch) {
+  const teams = await inTx(c)<{ id: string; seed: number | null }>(
+    `SELECT id, seed FROM friend_teams WHERE tournament_id = $1 ORDER BY created_at, id`,
+    [t.id],
+  );
+  const done: TournamentRow = { ...t, status: "completed" };
+  const p = placementsFrom(done, games, buildTables(done, seedOrderOf(teams), games));
+  await c.query(
+    `UPDATE friend_tournaments
+        SET status = 'completed', champion_team_id = $2, completed_at = now()
+      WHERE id = $1`,
+    [t.id, p.champion],
+  );
+
+  const [{ n: guests }] = await inTx(c)<{ n: number }>(
+    `SELECT count(*)::int AS n FROM friend_team_guests WHERE tournament_id = $1`,
+    [t.id],
+  );
+  if (t.points_eligible && guests === 0) {
+    const ctx = { tournamentId: t.id };
+    const champs = [p.champion, ...p.groupWinners.map((w) => w.teamId)].filter((x): x is string => !!x);
+    for (const team of champs)
+      await addPoints(c, await teamPlayerIds(c, team), FRIEND_POINTS.champion, "champion", ctx);
+    if (p.runnerUp)
+      await addPoints(c, await teamPlayerIds(c, p.runnerUp), FRIEND_POINTS.runnerUp, "runner_up", ctx);
+    for (const team of p.semis)
+      await addPoints(c, await teamPlayerIds(c, team), FRIEND_POINTS.semiFinalist, "semi_finalist", ctx);
+  }
+
+  const href = tournamentPath(t.id);
+  let message: string;
+  if (p.groupWinners.length) {
+    // one client can only run one query at a time — so one by one
+    const names: string[] = [];
+    for (const w of p.groupWinners) names.push(`${groupName(w.group)}: ${await teamName(c, w.teamId)}`);
+    message = `${t.name} is over. Group winners — ${names.join(" · ")}.`;
+  } else if (p.champion) {
+    message = `${t.name} is over. ${await teamName(c, p.champion)} won it!`;
+  } else message = `${t.name} is over.`;
+  for (const pid of uniq(await playersOfTournament(c, t.id)))
+    await batch.notify(pid, "tournament_done", message, href);
+  if (!(await playersOfTournament(c, t.id)).includes(t.organizer_id))
+    await batch.notify(t.organizer_id, "tournament_done", message, href);
+}
+
+/** write a plan's matches; first-round BYEs go straight through */
+async function insertPlan(c: PoolClient, t: TournamentRow, plan: PlanGame<string>[], batch: Batch) {
+  const ids = new Map(plan.map((g) => [g.key, nid("fg")]));
+  const s = settingsOf(t);
+  for (const g of plan) {
+    const both = g.a !== null && g.b !== null;
+    await c.query(
+      `INSERT INTO friend_games
+         (id, name, organizer_id, format, players_per_team, status, tournament_id, round, position,
+          next_game_id, next_slot, is_bye, team_a_id, team_b_id, winner_team_id, completed_at,
+          stage, group_no, label, loser_next_game_id, loser_next_slot, due_date, best_of)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+      [
+        ids.get(g.key),
+        `${t.name} — ${g.group ? `${groupName(g.group)} · ` : ""}${g.label}`,
+        t.organizer_id,
+        t.format,
+        t.players_per_team,
+        g.isBye ? "completed" : both ? "ready" : "waiting_for_players",
+        t.id,
+        g.round,
+        g.position,
+        g.winnerTo ? ids.get(g.winnerTo.key) : null,
+        g.winnerTo?.slot ?? null,
+        g.isBye,
+        g.a,
+        g.b,
+        g.isBye ? (g.a ?? g.b) : null,
+        g.isBye ? new Date() : null,
+        g.stage,
+        g.group,
+        g.label,
+        g.loserTo ? ids.get(g.loserTo.key) : null,
+        g.loserTo?.slot ?? null,
+        g.dueDate,
+        bestOfFor(s, g),
+      ],
+    );
+  }
+  const live: TournamentRow = { ...t, status: "in_progress" };
+  for (const g of plan.filter((x) => x.isBye && x.winnerTo))
+    await fillSlot(c, batch, ids.get(g.winnerTo!.key)!, g.winnerTo!.slot, (g.a ?? g.b)!, live);
 }
 
 /** put a team into a bracket slot; the next match becomes ready when both are set */
@@ -1621,6 +2443,7 @@ export async function createTournament(
     capacityTeams: unknown;
     seeding?: unknown;
     teams?: TeamInput[];
+    settings?: unknown;
   },
 ): Promise<string> {
   if (actor.role !== "player") throw new FriendsError(403, "Only players can create tournaments.");
@@ -1633,6 +2456,9 @@ export async function createTournament(
       `Choose between ${MIN_TEAMS_TO_START} and ${MAX_TOURNAMENT_TEAMS} entries.`,
     );
   const seeding = input.seeding === "ranking" ? "ranking" : "random";
+  const settings = normalizeSettings(input.settings);
+  const formatProblem = validateSettings(settings, capacity);
+  if (formatProblem) throw new FriendsError(400, formatProblem);
   const teams = input.teams ?? [];
   if (teams.length > capacity)
     throw new FriendsError(
@@ -1655,9 +2481,9 @@ export async function createTournament(
     const name = cleanName(input.name, `${actor.nickname}'s ${f.code} tournament`);
     await c.query(
       `INSERT INTO friend_tournaments
-         (id, name, organizer_id, format, players_per_team, capacity_teams, seeding)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [id, name, actor.id, f.code, f.playersPerTeam, capacity, seeding],
+         (id, name, organizer_id, format, players_per_team, capacity_teams, seeding, kind, settings)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, name, actor.id, f.code, f.playersPerTeam, capacity, seeding, settings.kind, JSON.stringify(settings)],
     );
     const t = await lockTournament(c, id);
     const batch = new Batch(c);
@@ -1964,7 +2790,15 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
         400,
         `At least ${MIN_TEAMS_TO_START} complete ${noun} are needed to start (you have ${complete.length}).`,
       );
-    const byes = nextPow2(complete.length) - complete.length;
+    const s = settingsOf(t);
+    const problem = validateSettings(s, complete.length);
+    if (problem)
+      throw new FriendsError(
+        400,
+        `${problem} With ${complete.length} complete ${noun}, change the format or add more ${noun}.`,
+      );
+    const preview = planMain(s, complete.map((x) => x.id));
+    const byes = preview.filter((g) => g.isBye).length;
     if ((incomplete.length > 0 || complete.length < t.capacity_teams) && !force) {
       throw new FriendsError(409, "Please confirm starting with the current line-up.", {
         code: "confirm",
@@ -1992,54 +2826,12 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
     const seeded = await seedTeams(c, t, complete.map((x) => x.id));
     for (let i = 0; i < seeded.length; i++)
       await c.query(`UPDATE friend_teams SET seed = $2 WHERE id = $1`, [seeded[i], i + 1]);
-    const bracket = generateBracket(seeded);
-
-    const gameId = new Map<string, string>();
-    const key = (r: number, p: number) => `${r}:${p}`;
-    for (const g of bracket.games) gameId.set(key(g.round, g.position), nid("fg"));
-
-    for (const g of bracket.games) {
-      const id = gameId.get(key(g.round, g.position))!;
-      const next = g.next ? gameId.get(key(g.next.round, g.next.position))! : null;
-      const both = g.a !== null && g.b !== null;
-      await c.query(
-        `INSERT INTO friend_games
-           (id, name, organizer_id, format, players_per_team, status, tournament_id, round, position,
-            next_game_id, next_slot, is_bye, team_a_id, team_b_id, winner_team_id, completed_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-        [
-          id,
-          `${t.name} — ${roundName(g.round, bracket.rounds)}`,
-          t.organizer_id,
-          t.format,
-          t.players_per_team,
-          g.isBye ? "completed" : both ? "ready" : "waiting_for_players",
-          t.id,
-          g.round,
-          g.position,
-          next,
-          g.next?.slot ?? null,
-          g.isBye,
-          g.a,
-          g.b,
-          g.isBye ? (g.a ?? g.b) : null,
-          g.isBye ? new Date() : null,
-        ],
-      );
-    }
-    // BYEs advance immediately, through the same slot-filling path as real wins
-    const started: TournamentRow = { ...t, status: "in_progress" };
-    for (const g of bracket.games.filter((x) => x.isBye && x.next)) {
-      const winner = (g.a ?? g.b) as string;
-      await fillSlot(
-        c,
-        batch,
-        gameId.get(key(g.next!.round, g.next!.position))!,
-        g.next!.slot,
-        winner,
-        started,
-      );
-    }
+    // a weekly schedule with no start date starts this week
+    const plan = planMain(
+      s.schedule === "weekly" && !s.startDate ? { ...s, startDate: todayIso() } : s,
+      seeded,
+    );
+    await insertPlan(c, { ...t, status: "in_progress" }, plan, batch);
 
     const players = (
       await inTx(c)<{ player_id: string }>(
@@ -2065,7 +2857,7 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
       await batch.notify(
         pid,
         "tournament_started",
-        `${t.name} has started — the bracket is live.`,
+        startMessage(t),
         tournamentPath(t.id),
       );
     await bumpTournament(c, t.id);
@@ -2076,12 +2868,69 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
   });
 }
 
-export async function cancelTournament(tournamentId: string, actor: Actor) {
+function startMessage(t: TournamentRow): string {
+  switch (t.kind) {
+    case "league":
+      return `${t.name} has started — the fixtures are out. Play your league matches.`;
+    case "groups":
+      return `${t.name} has started — the groups are drawn. Play your group matches.`;
+    case "double_elim":
+      return `${t.name} has started — the bracket is live. Lose twice and you're out.`;
+    default:
+      return `${t.name} has started — the bracket is live.`;
+  }
+}
+
+/** organizer changes the format (and its options) while registration is open */
+export async function updateTournamentFormat(tournamentId: string, actor: Actor, raw: unknown) {
+  await transaction(async (c) => {
+    const t = await lockTournament(c, tournamentId);
+    assertOrganizer(t, actor);
+    assertOpen(t);
+    const s = normalizeSettings(raw);
+    const problem = validateSettings(s, t.capacity_teams);
+    if (problem) throw new FriendsError(400, problem);
+    await c.query(`UPDATE friend_tournaments SET kind = $2, settings = $3 WHERE id = $1`, [
+      tournamentId,
+      s.kind,
+      JSON.stringify(s),
+    ]);
+    const batch = new Batch(c);
+    await bumpTournament(c, tournamentId);
+    await touchTournament(c, batch, tournamentId);
+    await batch.flush();
+  });
+}
+
+/** step 1 of cancelling: a one-time code the organizer must type back */
+export async function requestTournamentCancelCode(tournamentId: string, actor: Actor): Promise<string> {
+  return transaction(async (c) => {
+    const t = await lockTournament(c, tournamentId);
+    assertOrganizer(t, actor);
+    if (t.status !== "registration_open" && t.status !== "in_progress")
+      throw new FriendsError(409, "This tournament is already finished.");
+    const { code, hash, expires } = newCancelCode();
+    await c.query(
+      `UPDATE friend_tournaments SET cancel_code_hash = $2, cancel_code_expires = $3 WHERE id = $1`,
+      [t.id, hash, expires],
+    );
+    return code;
+  });
+}
+
+/** step 2: cancel — only with the code from step 1 */
+export async function cancelTournament(tournamentId: string, actor: Actor, code?: unknown) {
   await transaction(async (c) => {
     const t = await lockTournament(c, tournamentId);
     assertOrganizer(t, actor);
     if (t.status !== "registration_open" && t.status !== "in_progress")
       throw new FriendsError(409, "This tournament is already finished.");
+    if (!cancelCodeOk(code, t.cancel_code_hash, t.cancel_code_expires))
+      throw new FriendsError(400, "That code doesn't match or has expired. Get a new code and try again.");
+    await c.query(
+      `UPDATE friend_tournaments SET cancel_code_hash = NULL, cancel_code_expires = NULL WHERE id = $1`,
+      [t.id],
+    );
     await c.query(`UPDATE friend_tournaments SET status = 'cancelled' WHERE id = $1`, [tournamentId]);
     await c.query(
       `UPDATE friend_games SET status = 'cancelled', version = version + 1

@@ -19,7 +19,7 @@ export default async function NewTournamentPage() {
         image={BACKDROPS.breakOff}
         kicker="Friends · 8-Ball"
         title="Create a tournament"
-        intro="Choose the format and size, add your friends, and the bracket builds itself when you start."
+        intro="Four quick steps. Pick the game, add who's playing, choose how to play — the matches are made for you."
       />
       <div className="mx-auto max-w-6xl px-5 pb-28 md:px-8">
         <NewTournament me={me} />

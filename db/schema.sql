@@ -579,3 +579,60 @@ CREATE TABLE IF NOT EXISTS player_avatars (
   version    TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ----------------------------------------------- friend tournament formats ---
+ALTER TABLE friend_tournaments
+  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'knockout'
+    CHECK (kind IN ('knockout','double_elim','league','groups')),
+  ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- main = first stage running; tiebreak = deciders / organizer ruling; playoffs = knockout after the table
+  ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'main'
+    CHECK (phase IN ('main','tiebreak','playoffs')),
+  -- recorded tie-break orders: [{ "group": 1|null, "teams": ["winner","loser", …] }]
+  ADD COLUMN IF NOT EXISTS tiebreaks JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE friend_games
+  ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'knockout'
+    CHECK (stage IN ('knockout','upper','lower','grand_final','third_place','league','group','playoff','decider')),
+  ADD COLUMN IF NOT EXISTS group_no INT,
+  ADD COLUMN IF NOT EXISTS label TEXT,
+  ADD COLUMN IF NOT EXISTS loser_next_game_id TEXT REFERENCES friend_games(id) DEFERRABLE INITIALLY DEFERRED,
+  ADD COLUMN IF NOT EXISTS loser_next_slot TEXT CHECK (loser_next_slot IN ('a','b')),
+  ADD COLUMN IF NOT EXISTS due_date DATE;
+
+-- a round/position is now unique within a stage (and group), not the whole tournament
+DROP INDEX IF EXISTS friend_games_slot_uq;
+CREATE UNIQUE INDEX IF NOT EXISTS friend_games_stage_slot_uq
+  ON friend_games (tournament_id, stage, COALESCE(group_no, 0), round, position)
+  WHERE tournament_id IS NOT NULL;
+
+-- ------------------------------------- friends play on the in-house board ---
+ALTER TABLE matches
+  ADD COLUMN IF NOT EXISTS friend_game_id TEXT UNIQUE REFERENCES friend_games(id) ON DELETE CASCADE;
+
+-- ---------------------------------------------------- match length (best of) ---
+ALTER TABLE friend_games
+  ADD COLUMN IF NOT EXISTS best_of INT NOT NULL DEFAULT 1 CHECK (best_of IN (1,3,5,7,9)),
+  ADD COLUMN IF NOT EXISTS score_a INT CHECK (score_a >= 0),
+  ADD COLUMN IF NOT EXISTS score_b INT CHECK (score_b >= 0),
+  ADD COLUMN IF NOT EXISTS reported_score_a INT CHECK (reported_score_a >= 0),
+  ADD COLUMN IF NOT EXISTS reported_score_b INT CHECK (reported_score_b >= 0);
+
+ALTER TABLE tournaments
+  ADD COLUMN IF NOT EXISTS best_of JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- ------------------------------------------------- cancel needs a code ---
+ALTER TABLE friend_tournaments
+  ADD COLUMN IF NOT EXISTS cancel_code_hash TEXT,
+  ADD COLUMN IF NOT EXISTS cancel_code_expires TIMESTAMPTZ;
+
+ALTER TABLE tournaments
+  ADD COLUMN IF NOT EXISTS cancel_code_hash TEXT,
+  ADD COLUMN IF NOT EXISTS cancel_code_expires TIMESTAMPTZ;
+
+-- ----------------------------------------- no dates, parallel matches ---
+ALTER TABLE tournaments ALTER COLUMN start_at DROP NOT NULL;
+ALTER TABLE tournaments ALTER COLUMN registration_deadline DROP NOT NULL;
+
+
+ALTER TABLE friend_games ADD COLUMN IF NOT EXISTS table_name TEXT;

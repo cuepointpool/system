@@ -9,6 +9,8 @@
     "lint": "eslint",
     "db:setup": "node --env-file=.env --import tsx scripts/setup.ts",
     "test:friends": "node --import tsx scripts/test-friends.ts",
+    "test:structure": "node --import tsx scripts/test-structure.ts",
+    "test:ranked": "node --import tsx scripts/test-ranked.ts",
     "test:membership": "node --import tsx scripts/test-membership.ts"
   },
   "dependencies": {

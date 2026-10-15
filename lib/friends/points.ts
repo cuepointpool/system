@@ -9,6 +9,8 @@ export const FRIEND_POINTS = {
   gameWin: 10,
   gameLoss: 2,
   tournamentMatchWin: 15,
+  /** a league / group match: there are many more of them than knockout rounds */
+  leagueMatchWin: 5,
   champion: 50,
   runnerUp: 25,
   semiFinalist: 10,

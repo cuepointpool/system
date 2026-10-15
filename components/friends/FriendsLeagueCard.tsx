@@ -58,8 +58,8 @@ export function FriendsLeagueCard({
         </ul>
       )}
       <p className="mt-3 text-[10px] leading-relaxed text-mist/70">
-        Friends points come from casual games and friend tournaments. They&apos;re separate from your official
-        ranking.
+        Friends points come from casual games and friend tournaments. A 1v1 against another registered
+        player also counts on the Cue Point in-house leaderboard; games with a guest never do.
       </p>
     </div>
   );

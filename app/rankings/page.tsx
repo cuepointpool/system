@@ -3,7 +3,7 @@ import { PageHero } from "@/components/eco/Primitives";
 import { BACKDROPS } from "@/lib/gallery";
 import { LeaderboardTabs } from "@/components/eco/LeaderboardTabs";
 import { getCampaignLeaderboard } from "@/lib/campaign/progress";
-import { getLeaderboard } from "@/lib/ecosystem/store";
+import { getLeaderboard, getRankedLeaderboard } from "@/lib/ecosystem/store";
 
 export const dynamic = "force-dynamic";
 
@@ -11,12 +11,13 @@ export const metadata: Metadata = {
   alternates: { canonical: "/rankings" },
   title: "Rankings",
   description:
-    "The official Cue Point leaderboard — ranking points, recent form and movement for every player, updated after each recorded match.",
+    "Cue Point leaderboards — the in-house board for every registered player, and the Ranked board from Cue Point-hosted tournaments.",
 };
 
 export default async function RankingsPage() {
-  const [rows, gameRows] = await Promise.all([
+  const [rows, ranked, gameRows] = await Promise.all([
     getLeaderboard("all_time"),
+    getRankedLeaderboard(),
     getCampaignLeaderboard(),
   ]);
   const top = rows[0];
@@ -34,12 +35,14 @@ export default async function RankingsPage() {
         }
         intro={
           <>
-            Every recorded frame moves the board. Beat a higher-ranked player and
-            you climb faster; drop a frame to a rookie and it stings.
+            Two boards. <span className="text-white">In-house</span> ranks every
+            registered player on every match played here.{" "}
+            <span className="text-white">Ranked</span> counts only the tournaments
+            Cue Point hosts.
             {top && (
               <>
                 {" "}
-                Current #1:{" "}
+                In-house #1:{" "}
                 <span className="text-white">{top.nickname}</span> on{" "}
                 {top.rankingPoints.toLocaleString()} pts.
               </>
@@ -59,7 +62,7 @@ export default async function RankingsPage() {
             </p>
           </div>
         ) : (
-          <LeaderboardTabs official={rows} game={gameRows} />
+          <LeaderboardTabs official={rows} ranked={ranked} game={gameRows} />
         )}
       </section>
     </>

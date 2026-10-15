@@ -5,6 +5,12 @@ import { json, readBody, str, withActor } from "@/lib/friends/http";
 
 export const dynamic = "force-dynamic";
 
+/** { scoreA, scoreB } from the body — frames won by side A and side B */
+function score(b: Record<string, unknown>): { a: number; b: number } | null {
+  if (b.scoreA === undefined || b.scoreB === undefined) return null;
+  return { a: Math.trunc(Number(b.scoreA)), b: Math.trunc(Number(b.scoreB)) };
+}
+
 /** POST /api/friends/games/:id/:action — every state change goes through here */
 export async function POST(
   req: NextRequest,
@@ -18,10 +24,10 @@ export async function POST(
         await F.respondToGame(id, actor, b.accept !== false);
         break;
       case "start":
-        await F.startGame(id, actor);
+        await F.startGame(id, actor, typeof b.tableName === "string" ? b.tableName : null);
         break;
       case "report":
-        await F.reportResult(id, actor, str(b.winnerTeamId));
+        await F.reportResult(id, actor, str(b.winnerTeamId), score(b));
         break;
       case "confirm":
         await F.confirmResult(id, actor);
@@ -29,8 +35,11 @@ export async function POST(
       case "dispute":
         await F.disputeResult(id, actor);
         break;
+      case "undo":
+        await F.undoResult(id, actor);
+        break;
       case "settle":
-        await F.settleResult(id, actor, str(b.winnerTeamId));
+        await F.settleResult(id, actor, str(b.winnerTeamId), score(b));
         break;
       case "cancel":
         await F.cancelGame(id, actor);

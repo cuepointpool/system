@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
       capacityTeams: b.capacityTeams,
       seeding: b.seeding,
       teams,
+      settings: b.settings,
     });
     return json({ id }, 201);
   });

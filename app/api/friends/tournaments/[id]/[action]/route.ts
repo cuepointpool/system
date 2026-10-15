@@ -20,8 +20,10 @@ export async function POST(
       case "start":
         await F.startTournament(id, actor, b.force === true);
         break;
+      case "cancel-code":
+        return json({ code: await F.requestTournamentCancelCode(id, actor) });
       case "cancel":
-        await F.cancelTournament(id, actor);
+        await F.cancelTournament(id, actor, b.code);
         break;
       case "add-team":
         await F.addTeam(id, actor, strList(b.playerIds), strList(b.guests));
@@ -37,6 +39,9 @@ export async function POST(
         break;
       case "remove-team":
         await F.removeTeam(id, actor, str(b.teamId));
+        break;
+      case "format":
+        await F.updateTournamentFormat(id, actor, b.settings);
         break;
       case "remove-member":
         await F.removeTournamentMember(id, actor, str(b.playerId));

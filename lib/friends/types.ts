@@ -2,6 +2,7 @@
    truth; these are just its current shape as one viewer is allowed to see it. */
 
 import type { FormatCode } from "./formats";
+import type { Stage, StandingRow, TournamentKind, TournamentSettings } from "./structure";
 
 export type GameStatus =
   | "waiting_for_players"
@@ -55,7 +56,10 @@ export interface GameViewer {
   canReport: boolean;
   canConfirm: boolean;
   canDispute: boolean;
+  /** organizer: set the winner directly — final, no confirmation needed */
   canSettle: boolean;
+  /** organizer: change or undo a finished result */
+  canChange: boolean;
   canCancel: boolean;
   canManage: boolean;
   canLeave: boolean;
@@ -81,6 +85,22 @@ export interface GameView {
   round: number | null;
   roundName: string | null;
   position: number | null;
+  /** which part of the tournament: knockout, upper/lower bracket, league, group, playoff… */
+  stage: Stage | null;
+  /** 1-based group number (group stage and its tie-breakers) */
+  group: number | null;
+  /** weekly leagues: play by this date (YYYY-MM-DD) */
+  dueDate: string | null;
+  /** match length: 1 (single frame), 3, 5, 7 or 9 */
+  bestOf: number;
+  /** frames won by side A / side B once finished */
+  scoreA: number | null;
+  scoreB: number | null;
+  /** the score a player reported, awaiting confirmation */
+  reportedScoreA: number | null;
+  reportedScoreB: number | null;
+  /** the table a running match is on, if someone said */
+  tableName: string | null;
   isBye: boolean;
   /** a guest is playing on either side, so no Friends League points are awarded */
   guestMatch: boolean;
@@ -100,12 +120,47 @@ export interface TournamentViewer {
   canStart: boolean;
   canCancel: boolean;
   canLeave: boolean;
+  /** organizer: may change the format while registration is open */
+  canEditFormat: boolean;
 }
 
 export interface BracketRound {
   round: number;
   name: string;
   games: GameView[];
+}
+
+export interface StandingView extends StandingRow {
+  team: TeamView;
+  /** goes through to the next stage / wins (once the table is final) */
+  through: boolean;
+}
+
+/** one tab of the tournament page */
+export type TournamentSection =
+  | { id: string; title: string; kind: "bracket"; rounds: BracketRound[] }
+  | {
+      id: string;
+      title: string;
+      kind: "table";
+      group: number | null;
+      rows: StandingView[];
+      /** lines drawn under these places ("top 2 go through") */
+      cuts: number[];
+      cutNote: string;
+      rounds: BracketRound[];
+    }
+  | { id: string; title: string; kind: "list"; games: GameView[] };
+
+/** a tie the tournament can't get past yet */
+export interface PendingTie {
+  group: number | null;
+  title: string;
+  teams: TeamView[];
+  /** play-off matches still to play between these level players */
+  matchesLeft: number;
+  /** 1 = first play-off; 2+ = they came out level again and play another round */
+  playoffRound: number;
 }
 
 export interface TournamentView {
@@ -125,10 +180,20 @@ export interface TournamentView {
   playersJoined: number;
   /** how many of those are guests */
   guests: number;
-  rounds: BracketRound[];
+  kind: TournamentKind;
+  settings: TournamentSettings;
+  /** main = first stage; tiebreak = settling ties; playoffs = knockout after the table */
+  phase: "main" | "tiebreak" | "playoffs";
+  sections: TournamentSection[];
+  pendingTies: PendingTie[];
+  /** the viewer's match that needs them now (play, confirm), if any */
+  myNextGame: GameView | null;
   byes: number;
   champion: TeamView | null;
   runnerUp: TeamView | null;
+  third: TeamView | null;
+  /** groups with no knockout: each group's winner */
+  groupWinners: { group: number; title: string; team: TeamView }[];
   version: number;
   createdAt: string;
   startedAt: string | null;
@@ -155,6 +220,7 @@ export interface TournamentListItem {
   id: string;
   name: string;
   format: FormatCode;
+  kind: TournamentKind;
   status: TournamentStatus;
   capacityTeams: number;
   teams: number;

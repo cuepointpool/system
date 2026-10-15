@@ -52,7 +52,7 @@ export async function HomeScene() {
   const top = leaderboard.slice(0, 5);
   const tournaments = allTournaments
     .map((t) => ({ ...t, status: derivedTournamentStatus(t) }))
-    .sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt));
+    .sort((a, b) => (a.startAt ? +new Date(a.startAt) : Infinity) - (b.startAt ? +new Date(b.startAt) : Infinity));
   const featured =
     tournaments.find((t) => t.status === "registration_open") ??
     tournaments.find((t) => t.status === "live") ??
@@ -196,7 +196,7 @@ export async function HomeScene() {
                 {more.length > 0 && (
                   <ul className="mt-6 border-t border-white/10">
                     {more.map((t) => {
-                      const { mon, day } = monthDay(t.startAt);
+                      const { mon, day } = t.startAt ? monthDay(t.startAt) : { mon: "TBA", day: "—" };
                       return (
                         <li key={t.id} className="border-b border-white/10">
                           <Link
@@ -242,7 +242,7 @@ function FeaturedTournament({
         {t.name}
       </h4>
       <p className="mt-2 text-[15px] text-white/85">
-        {formatDateShort(t.startAt)} · {t.venue}
+        {t.startAt ? formatDateShort(t.startAt) : "Date to be announced"} · {t.venue}
       </p>
 
       {t.rules.length > 0 && (

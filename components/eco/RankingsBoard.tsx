@@ -17,7 +17,6 @@ const SCOPES: { value: RankingScope; label: string }[] = [
   { value: "all_time", label: "All-time" },
   { value: "monthly", label: "Monthly" },
   { value: "weekly", label: "Weekly" },
-  { value: "tournament", label: "Tournament" },
 ];
 
 export function RankingsBoard({
@@ -64,9 +63,7 @@ export function RankingsBoard({
             ? "Points won in the last 7 days"
             : scope === "monthly"
               ? "Points won in the last 30 days"
-              : scope === "tournament"
-                ? "Ranked on tournament results only"
-                : "Career ranking points"}
+              : "Career ranking points"}
         </p>
       </div>
 

@@ -1,16 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { MIN_TEAMS_TO_START } from "@/lib/friends/formats";
-import type { GameView, TeamView, TournamentView } from "@/lib/friends/types";
+import { bestOfLabel, describe, framesToWin, winningScores, type TournamentSettings } from "@/lib/friends/structure";
+import type { GameView, PendingTie, TeamView, TournamentSection, TournamentView } from "@/lib/friends/types";
 import { apiPost } from "./api";
+import { FormatPicker, formatLine } from "./FormatPicker";
 import { LiveDot } from "./GameLobby";
 import { GuestAdder, PlayerPicker, type PickedPlayer } from "./PlayerPicker";
 import { useLiveView } from "./useLiveView";
-import { Card, CountBar, GhostButton, Notice, PlayerLine, PrimaryButton, StatusPill } from "./ui";
+import { Card, CountBar, GhostButton, Notice, PlayerLine, PrimaryButton } from "./ui";
+
+/* ------------------------------------------------------------------
+   The tournament page, built for people who just want to play:
+     · one box at the top that says what to do now
+     · four big tabs: Play now · Standings · All matches · Players
+     · every match card has one clear button; entering a result is
+       "who won?" then (for longer matches) "what was the score?"
+   ------------------------------------------------------------------ */
 
 interface ConfirmInfo {
   complete: number;
@@ -18,6 +28,11 @@ interface ConfirmInfo {
   dropped: string[];
   byes: number;
 }
+
+type Tab = "play" | "standings" | "matches" | "players" | "format";
+
+/** the venue's tables, so a match can be started "on Table 2" */
+const TablesContext = createContext<string[]>([]);
 
 export function TournamentLobby({ initial, meId }: { initial: TournamentView; meId: string }) {
   const router = useRouter();
@@ -31,6 +46,15 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmInfo | null>(null);
   const [draft, setDraft] = useState<PickedPlayer[]>([]);
+  const [tab, setTab] = useState<Tab | null>(null);
+  const [cancel, setCancel] = useState<{ code: string; typed: string } | null>(null);
+  const [tables, setTables] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/tables")
+      .then((r) => r.json())
+      .then((d) => Array.isArray(d.tables) && setTables(d.tables.map((x: { label: string }) => x.label.split(" — ")[0])))
+      .catch(() => {});
+  }, []);
 
   async function act(action: string, body: Record<string, unknown> = {}) {
     setBusy(true);
@@ -56,31 +80,45 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
   }
 
   const v = t.viewer;
-  const noun = t.playersPerTeam === 1 ? "players" : "teams";
+  const ppt = t.playersPerTeam;
+  const noun = ppt === 1 ? "players" : "teams";
   const open = t.status === "registration_open";
-  const full = open && t.teams.length >= t.capacityTeams && t.teamsComplete >= t.capacityTeams;
-  const missingPlayers = Math.max(0, t.requiredPlayers - t.playersJoined);
   const taken = new Set(t.teams.flatMap((x) => x.members.map((m) => m.id)));
-  const canAddTeam = v.canManage && t.teams.length < t.capacityTeams;
+
+  const everyGame = t.sections.flatMap(sectionGames);
+  const playingNow = everyGame.filter((g) => !g.isBye && g.status === "in_progress");
+  const atTable = new Set(playingNow.flatMap((g) => [g.teamA?.id, g.teamB?.id]).filter(Boolean));
+  const readyAll = everyGame.filter((g) => !g.isBye && g.status === "ready");
+  const readyNow = readyAll.filter((g) => !atTable.has(g.teamA?.id) && !atTable.has(g.teamB?.id));
+  const waiting = readyAll.length - readyNow.length;
+
+  const tabs: { id: Tab; label: string; icon: string }[] = open
+    ? [
+        { id: "players", label: ppt === 1 ? "Players" : "Teams", icon: "👥" },
+        { id: "format", label: "How it's played", icon: "📖" },
+      ]
+    : [
+        { id: "play", label: "Play now", icon: "▶" },
+        { id: "standings", label: t.kind === "knockout" || t.kind === "double_elim" ? "Bracket" : "Standings", icon: "🏆" },
+        { id: "matches", label: "All matches", icon: "📋" },
+        { id: "players", label: ppt === 1 ? "Players" : "Teams", icon: "👥" },
+      ];
+  const activeTab: Tab = tab && tabs.some((x) => x.id === tab) ? tab : tabs[0].id;
 
   async function addToDraft(p: PickedPlayer) {
     const guestNames = new Set(
       t.teams.flatMap((x) => x.members.filter((m) => m.guest).map((m) => m.nickname.toLowerCase())),
     );
     if (p.guest && guestNames.has(p.nickname.toLowerCase())) {
-      setError(`There is already a guest called ${p.nickname} in this tournament. Use a different name.`);
+      setError(`There is already a guest called ${p.nickname}. Use a different name.`);
       return;
     }
     if (taken.has(p.id) || draft.some((d) => d.id === p.id)) {
-      setError(
-        t.playersPerTeam === 1
-          ? `${p.nickname} is already in this tournament.`
-          : `${p.nickname} is already a member of another team in this tournament.`,
-      );
+      setError(ppt === 1 ? `${p.nickname} is already in.` : `${p.nickname} is already in a team.`);
       return;
     }
     const next = [...draft, p];
-    if (next.length === t.playersPerTeam) {
+    if (next.length === ppt) {
       setDraft([]);
       await act("add-team", {
         playerIds: next.filter((x) => !x.guest).map((x) => x.id),
@@ -93,291 +131,779 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusPill status={t.status} kind="tournament" full={full} />
-              <span className="rounded-full border border-white/10 px-2.5 py-0.5 text-[11px] text-mist">
-                {t.format} · 8-Ball · single elimination
-              </span>
+    <TablesContext.Provider value={tables}>
+      <div className="space-y-5">
+        {/* ---------- header ---------- */}
+        <Card>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#c4b5fd]">{statusWords(t)}</p>
+              <h1 className="mt-1 font-display text-2xl font-bold text-white sm:text-3xl">{t.name}</h1>
+              <p className="mt-1 text-sm text-mist">
+                {ppt === 1 ? "Singles" : "Doubles"} · {formatLine(t.settings)}
+              </p>
+              <p className="mt-1 text-xs text-mist">
+                Organized by {t.organizer.nickname}
+                {v.isOrganizer ? " (you)" : ""}
+              </p>
             </div>
-            <h1 className="mt-3 font-display text-2xl font-bold text-white sm:text-3xl">{t.name}</h1>
-            <p className="mt-1 text-xs text-mist">
-              Organized by {t.organizer.nickname}
-              {v.isOrganizer ? " (you)" : ""} · created {timeAgo(t.createdAt)} ·{" "}
-              {t.seeding === "ranking" ? "seeded by ranking" : "random draw"}
-            </p>
+            <LiveDot />
           </div>
-          <LiveDot />
+          {t.guests > 0 && (
+            <p className="mt-3 text-xs text-mist">
+              Matches with a guest (no Cue Point account) are just for fun — they earn no points.
+            </p>
+          )}
+        </Card>
+
+        {/* ---------- what to do now ---------- */}
+        <NextStep
+          t={t}
+          meId={meId}
+          busy={busy}
+          readyNow={readyNow.length}
+          onAct={act}
+          onDone={refetch}
+          onGo={setTab}
+          onLeave={async () => (await act("respond", { accept: false })) && router.push("/play")}
+        />
+
+        {confirm && (
+          <Card className="border-[#ffb066]/40 bg-[#ff9d3d]/[0.06]">
+            <p className="text-base font-semibold text-white">Start with who&apos;s ready now?</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-mist">
+              <li>
+                {confirm.complete} of {confirm.capacity} {noun} are ready.
+              </li>
+              {confirm.byes > 0 && (
+                <li>
+                  {confirm.byes} {noun} get a free pass through the first round.
+                </li>
+              )}
+              {confirm.dropped.length > 0 && <li>Left out (not complete): {confirm.dropped.join(", ")}.</li>}
+            </ul>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <PrimaryButton className="px-6 py-3 text-base" disabled={busy} onClick={() => act("start", { force: true })}>
+                Yes, start now
+              </PrimaryButton>
+              <GhostButton onClick={() => setConfirm(null)}>Wait for more</GhostButton>
+            </div>
+          </Card>
+        )}
+
+        {error && <Notice tone="error">{error}</Notice>}
+
+        {/* ---------- tabs ---------- */}
+        <div role="tablist" className="grid gap-2" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+          {tabs.map((x) => (
+            <button
+              key={x.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === x.id}
+              onClick={() => setTab(x.id)}
+              className={cn(
+                "flex flex-col items-center gap-0.5 rounded-2xl border-2 px-2 py-3 text-center transition-colors sm:flex-row sm:justify-center sm:gap-2",
+                activeTab === x.id
+                  ? "border-[#a78bfa] bg-[#a78bfa]/15 text-white"
+                  : "border-white/10 text-mist hover:border-white/30 hover:text-white",
+              )}
+            >
+              <span aria-hidden className="text-lg leading-none">{x.icon}</span>
+              <span className="text-xs font-semibold sm:text-sm">{x.label}</span>
+            </button>
+          ))}
         </div>
 
-        {open && (
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <CountBar
-              label={t.playersPerTeam === 1 ? "Players" : "Teams"}
-              have={t.teams.length}
-              need={t.capacityTeams}
+        <div>
+          {activeTab === "play" && (
+            <div className="space-y-6">
+              {t.pendingTies.map((tie, i) => (
+                <TieCard key={i} tie={tie} ppt={ppt} />
+              ))}
+              <Block title="On the tables now" empty="Nobody is playing right now." games={playingNow} meId={meId} ppt={ppt} onDone={refetch} />
+              <Block
+                title="Ready to start"
+                hint="Start as many as you have free tables."
+                empty={t.status === "in_progress" ? "No match can start right now." : ""}
+                games={readyNow}
+                meId={meId}
+                ppt={ppt}
+                onDone={refetch}
+              />
+              {waiting > 0 && (
+                <p className="text-sm text-mist">
+                  {waiting} more match{waiting === 1 ? " is" : "es are"} waiting for a player who&apos;s still at a table.
+                </p>
+              )}
+            </div>
+          )}
+
+          {activeTab === "standings" && <StandingsTab t={t} meId={meId} onDone={refetch} />}
+
+          {activeTab === "matches" && <AllMatches t={t} meId={meId} onDone={refetch} />}
+
+          {activeTab === "players" && (
+            <PlayersTab
+              t={t}
+              meId={meId}
+              busy={busy}
+              draft={draft}
+              taken={taken}
+              onAct={act}
+              onAdd={addToDraft}
+              onClearDraft={() => setDraft([])}
+              onError={setError}
             />
-            {t.playersPerTeam > 1 && (
-              <CountBar label="Players" have={t.playersJoined} need={t.requiredPlayers} />
-            )}
-          </div>
-        )}
-        {open && (
-          <p className="mt-3 text-sm text-mist">
-            {full
-              ? "Registration is full. The organizer can start the tournament."
-              : missingPlayers > 0
-                ? `${missingPlayers} more player${missingPlayers === 1 ? "" : "s"} needed to fill this tournament (${t.playersJoined}/${t.requiredPlayers} have accepted).`
-                : `Waiting for everyone to accept.`}
-          </p>
-        )}
-      </Card>
+          )}
 
-      {t.status === "completed" && t.champion && (
-        <Notice tone="ok">
-          🏆 Champions: <strong>{teamLabel(t.champion, t.playersPerTeam)}</strong>
-          {t.runnerUp ? ` · Runner-up: ${teamLabel(t.runnerUp, t.playersPerTeam)}` : ""}
-        </Notice>
+          {activeTab === "format" && <FormatCard t={t} busy={busy} onSave={(settings) => act("format", { settings })} />}
+        </div>
+
+        {/* ---------- cancel (needs a typed code) ---------- */}
+        {cancel && (
+          <Card className="border-red-400/40 bg-red-400/[0.06]">
+            <p className="text-base font-semibold text-white">Cancel {t.name} for everyone?</p>
+            <p className="mt-1 text-sm text-mist">This can&apos;t be undone. To confirm, type this code:</p>
+            <p className="mt-2 font-display text-3xl font-bold tracking-[0.3em] text-white tabular-nums">{cancel.code}</p>
+            <input
+              value={cancel.typed}
+              onChange={(e) => setCancel({ ...cancel, typed: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="Type the code"
+              aria-label="Type the code to confirm"
+              className="mt-3 w-48 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-3 text-center font-display text-xl tracking-[0.25em] text-white focus:border-red-400/60 focus:outline-none"
+            />
+            <div className="mt-4 flex flex-wrap gap-2">
+              <PrimaryButton className="px-6 py-3 text-base" onClick={() => setCancel(null)}>
+                Keep playing
+              </PrimaryButton>
+              <GhostButton
+                danger
+                disabled={busy || cancel.typed !== cancel.code}
+                onClick={async () => {
+                  if (await act("cancel", { code: cancel.typed })) setCancel(null);
+                }}
+              >
+                Yes, cancel it
+              </GhostButton>
+            </div>
+            <p className="mt-2 text-xs text-mist">The code works for 10 minutes.</p>
+          </Card>
+        )}
+
+        <div className="flex flex-wrap items-center gap-4 border-t border-white/10 pt-5">
+          <Link href="/play" className="text-sm text-mist hover:text-white">
+            ← Back to Play
+          </Link>
+          {open && v.canLeave && !v.isOrganizer && !v.invited && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => (await act("respond", { accept: false })) && router.push("/play")}
+              className="text-sm text-mist hover:text-red-300"
+            >
+              Leave this tournament
+            </button>
+          )}
+          {v.canCancel && !cancel && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                setError(null);
+                const r = await apiPost<{ code: string }>(`/api/friends/tournaments/${t.id}/cancel-code`, {});
+                if (r.ok) setCancel({ code: r.data.code, typed: "" });
+                else setError(r.error);
+              }}
+              className="ml-auto text-sm text-mist hover:text-red-300"
+            >
+              Cancel tournament
+            </button>
+          )}
+        </div>
+      </div>
+    </TablesContext.Provider>
+  );
+}
+
+/* ============================ top box ============================ */
+
+function statusWords(t: TournamentView): string {
+  if (t.status === "registration_open") return "Getting ready";
+  if (t.status === "in_progress") return t.phase === "tiebreak" ? "Playing · tie-breakers" : "Playing";
+  if (t.status === "completed") return "Finished";
+  return "Cancelled";
+}
+
+/** one box that tells this person what to do next */
+function NextStep({
+  t,
+  meId,
+  busy,
+  readyNow,
+  onAct,
+  onDone,
+  onGo,
+  onLeave,
+}: {
+  t: TournamentView;
+  meId: string;
+  busy: boolean;
+  readyNow: number;
+  onAct: (action: string, body?: Record<string, unknown>) => Promise<boolean>;
+  onDone: () => Promise<void>;
+  onGo: (tab: Tab) => void;
+  onLeave: () => void;
+}) {
+  const v = t.viewer;
+  const noun = t.playersPerTeam === 1 ? "players" : "teams";
+  const box = (children: React.ReactNode, tone: "accent" | "ok" | "plain" = "accent") => (
+    <section
+      className={cn(
+        "rounded-2xl border-2 p-5",
+        tone === "accent" && "border-[#a78bfa]/50 bg-[linear-gradient(160deg,rgba(167,139,250,0.14),rgba(236,72,153,0.04))]",
+        tone === "ok" && "border-teal/40 bg-teal/[0.07]",
+        tone === "plain" && "border-white/10 bg-white/[0.02]",
       )}
-      {t.status === "cancelled" && <Notice tone="error">This tournament was cancelled.</Notice>}
+    >
+      {children}
+    </section>
+  );
+  const heading = (text: string) => <p className="font-display text-xl font-bold text-white">{text}</p>;
 
-      {v.invited && open && (
-        <Card className="border-[#a78bfa]/40 bg-[#a78bfa]/[0.06]">
-          <p className="text-sm text-white">
-            <strong>{t.organizer.nickname}</strong> invited you to this {t.format} tournament.
-          </p>
-          <div className="mt-3 flex gap-2">
-            <PrimaryButton disabled={busy} onClick={() => act("respond", { accept: true })}>
-              Accept
+  if (t.status === "cancelled") return box(heading("This tournament was cancelled."), "plain");
+
+  if (t.status === "completed") {
+    return box(
+      <>
+        <p className="text-4xl" aria-hidden>🏆</p>
+        {t.groupWinners.length ? (
+          <>
+            {heading("Group winners")}
+            <ul className="mt-2 space-y-1 text-base text-white">
+              {t.groupWinners.map((w) => (
+                <li key={w.group}>
+                  {w.title}: <strong>{teamLabel(w.team, t.playersPerTeam)}</strong>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : t.champion ? (
+          <>
+            {heading(`${teamLabel(t.champion, t.playersPerTeam)} won!`)}
+            <p className="mt-1 text-sm text-mist">
+              {t.runnerUp ? `Runner-up: ${teamLabel(t.runnerUp, t.playersPerTeam)}` : ""}
+              {t.third ? ` · 3rd: ${teamLabel(t.third, t.playersPerTeam)}` : ""}
+            </p>
+          </>
+        ) : (
+          heading("Finished")
+        )}
+      </>,
+      "ok",
+    );
+  }
+
+  if (t.status === "registration_open") {
+    if (v.invited)
+      return box(
+        <>
+          {heading(`${t.organizer.nickname} invited you`)}
+          <p className="mt-1 text-sm text-mist">Do you want to play in this tournament?</p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <PrimaryButton className="px-8 py-3 text-base" disabled={busy} onClick={() => onAct("respond", { accept: true })}>
+              Yes, I&apos;m in
             </PrimaryButton>
-            <GhostButton disabled={busy} onClick={async () => (await act("respond", { accept: false })) && router.push("/play")}>
-              Decline
+            <GhostButton className="px-6 py-3" disabled={busy} onClick={onLeave}>
+              No thanks
             </GhostButton>
           </div>
-        </Card>
-      )}
-
-      {/* ---------- registration ---------- */}
-      {open && (
-        <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
-          <div className="space-y-4">
-            <p className="text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">
-              {t.playersPerTeam === 1 ? "Players" : "Teams"} ({t.teams.length}/{t.capacityTeams})
-            </p>
-            {t.teams.length === 0 && <p className="text-sm text-mist">Nobody added yet.</p>}
-            <div className="grid gap-4 sm:grid-cols-2">
-              {t.teams.map((team, i) => (
-                <Card key={team.id} className={cn(team.complete && "border-teal/30")}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-xs font-semibold text-mist">
-                      {t.playersPerTeam === 1 ? `Entry ${i + 1}` : `Team ${i + 1}`}
-                    </p>
-                    {team.complete ? (
-                      <span className="text-[10px] font-semibold text-teal">Complete</span>
-                    ) : (
-                      <span className="text-[10px] font-semibold text-[#ffb066]">Incomplete</span>
-                    )}
-                  </div>
-                  <div className="space-y-3">
-                    {team.members.map((m) => (
-                      <PlayerLine
-                        key={m.id}
-                        player={m}
-                        status={m.status}
-                        you={m.id === meId}
-                        right={
-                          v.canManage ? (
-                            <button
-                              onClick={() =>
-                                m.guest
-                                  ? act("remove-guest", { guestId: m.id })
-                                  : act("remove-member", { playerId: m.id })
-                              }
-                              disabled={busy}
-                              aria-label={`Remove ${m.nickname}`}
-                              className="grid h-6 w-6 place-items-center rounded-full text-xs text-mist hover:bg-red-400/20 hover:text-red-300"
-                            >
-                              ✕
-                            </button>
-                          ) : null
-                        }
-                      />
-                    ))}
-                  </div>
-                  {v.canManage && team.members.length < t.playersPerTeam && (
-                    <div className="mt-3">
-                      <p className="mb-2 text-xs text-[#ffc98f]">
-                        A {t.format} team must contain exactly {t.playersPerTeam} players.
-                      </p>
-                      <PlayerPicker
-                        exclude={new Set()}
-                        placeholder="Add a partner…"
-                        onPick={(p) =>
-                          taken.has(p.id)
-                            ? setError(`${p.nickname} is already a member of another team in this tournament.`)
-                            : act("add-member", { teamId: team.id, playerId: p.id })
-                        }
-                        disabled={busy}
-                      />
-                      <div className="mt-2">
-                        <GuestAdder
-                          placeholder="Or a guest's name"
-                          disabled={busy}
-                          onAdd={(p) => act("add-guest", { teamId: team.id, name: p.nickname })}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {v.canManage && (
-                    <button
-                      onClick={() => act("remove-team", { teamId: team.id })}
-                      disabled={busy}
-                      className="mt-3 text-[11px] text-mist underline-offset-2 hover:text-red-300 hover:underline"
-                    >
-                      Remove {t.playersPerTeam === 1 ? "entry" : "team"}
-                    </button>
-                  )}
-                </Card>
-              ))}
-            </div>
+        </>,
+      );
+    if (v.canStart) {
+      const enough = t.teamsComplete >= MIN_TEAMS_TO_START;
+      return box(
+        <>
+          {heading(enough ? "Ready when you are" : `Add ${noun}`)}
+          <p className="mt-1 text-sm text-mist">
+            {t.teamsComplete} of {t.capacityTeams} {noun} ready.{" "}
+            {enough
+              ? "Press Start and the matches are made for you. Late arrivals? Wait, or start without them."
+              : `You need at least ${MIN_TEAMS_TO_START} to start — add them in the ${t.playersPerTeam === 1 ? "Players" : "Teams"} tab.`}
+          </p>
+          <div className="mt-3 max-w-sm">
+            <CountBar label={t.playersPerTeam === 1 ? "Players" : "Teams"} have={t.teamsComplete} need={t.capacityTeams} />
           </div>
+          <PrimaryButton className="mt-4 px-10 py-3.5 text-base" disabled={busy || !enough} onClick={() => onAct("start")}>
+            ▶ Start tournament
+          </PrimaryButton>
+        </>,
+      );
+    }
+    return box(
+      <>
+        {heading("You're in!")}
+        <p className="mt-1 text-sm text-mist">
+          Waiting for {t.organizer.nickname} to start. {t.teamsComplete} of {t.capacityTeams} {noun} ready.
+        </p>
+      </>,
+      "plain",
+    );
+  }
 
-          <div className="space-y-4">
-            {canAddTeam && (
-              <Card>
-                <p className="mb-1 text-sm font-medium text-white">
-                  Add {t.playersPerTeam === 1 ? "a player" : "a team"}
-                </p>
-                {t.playersPerTeam > 1 && (
-                  <p className="mb-3 text-xs text-mist">
-                    Pick two friends
-                    {draft.length === 1 ? ` — ${draft[0].nickname} needs a partner` : ""}.
-                  </p>
-                )}
-                <PlayerPicker exclude={new Set()} onPick={addToDraft} disabled={busy} />
-                <p className="mb-2 mt-4 text-xs text-mist">
-                  Not registered? Add them as a guest. Matches with a guest earn no Friends League
-                  points.
-                </p>
-                <GuestAdder onAdd={addToDraft} disabled={busy} />
-                {draft.length > 0 && (
-                  <button
-                    onClick={() => setDraft([])}
-                    className="mt-2 text-xs text-mist underline-offset-2 hover:underline"
-                  >
-                    Clear unfinished team
-                  </button>
-                )}
-              </Card>
-            )}
+  // in progress
+  if (t.myNextGame)
+    return box(
+      <>
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#c4b5fd]">Your match</p>
+        <MatchCard g={t.myNextGame} meId={meId} ppt={t.playersPerTeam} onDone={onDone} big />
+      </>,
+    );
+  if (t.pendingTies.length)
+    return box(
+      <>
+        {heading("Tie-breakers")}
+        <p className="mt-1 text-sm text-mist">Some players finished level. They play it out — see Play now.</p>
+        <PrimaryButton className="mt-3 px-6 py-3" onClick={() => onGo("play")}>
+          Show tie-breakers
+        </PrimaryButton>
+      </>,
+    );
+  if (readyNow > 0)
+    return box(
+      <>
+        {heading(`${readyNow} match${readyNow === 1 ? "" : "es"} can start now`)}
+        <p className="mt-1 text-sm text-mist">Play them side by side on any free table.</p>
+        <PrimaryButton className="mt-3 px-6 py-3" onClick={() => onGo("play")}>
+          Show matches
+        </PrimaryButton>
+      </>,
+    );
+  return box(
+    <>
+      {heading("Nothing for you to play right now")}
+      <p className="mt-1 text-sm text-mist">Waiting for other matches to finish. This page updates by itself.</p>
+    </>,
+    "plain",
+  );
+}
 
-            {v.canStart && (
-              <Card>
-                <p className="text-sm font-medium text-white">Start the tournament</p>
-                <p className="mt-1 text-xs text-mist">
-                  The bracket is generated automatically from the complete {noun}
-                  {t.teamsComplete < t.capacityTeams ? "; any gaps become BYEs" : ""}.
-                </p>
-                <PrimaryButton
-                  className="mt-3"
-                  disabled={busy || t.teamsComplete < MIN_TEAMS_TO_START}
-                  onClick={() => act("start")}
-                >
-                  Start tournament
-                </PrimaryButton>
-                {t.teamsComplete < MIN_TEAMS_TO_START && (
-                  <p className="mt-2 text-xs text-mist">
-                    At least {MIN_TEAMS_TO_START} complete {noun} are needed ({t.teamsComplete} so far).
-                  </p>
-                )}
-              </Card>
-            )}
-          </div>
+/* ============================ tabs ============================ */
+
+function Block({
+  title,
+  hint,
+  empty,
+  games,
+  meId,
+  ppt,
+  onDone,
+}: {
+  title: string;
+  hint?: string;
+  empty: string;
+  games: GameView[];
+  meId: string;
+  ppt: number;
+  onDone: () => Promise<void>;
+}) {
+  const [all, setAll] = useState(false);
+  if (!games.length && !empty) return null;
+  const shown = all ? games : games.slice(0, 6);
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-lg font-semibold text-white">
+          {title} {games.length > 0 && <span className="text-mist">({games.length})</span>}
+        </h2>
+        {hint && games.length > 0 && <p className="text-xs text-mist">{hint}</p>}
+      </div>
+      {games.length === 0 ? (
+        <p className="text-sm text-mist">{empty}</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((g) => (
+            <MatchCard key={g.id} g={g} meId={meId} ppt={ppt} onDone={onDone} />
+          ))}
         </div>
       )}
-
-      {confirm && (
-        <Card className="border-[#ffb066]/40 bg-[#ff9d3d]/[0.06]">
-          <p className="text-sm font-semibold text-white">Start with the current line-up?</p>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-mist">
-            <li>
-              {confirm.complete} of {confirm.capacity} {noun} are ready.
-            </li>
-            {confirm.byes > 0 && (
-              <li>
-                {confirm.byes} BYE{confirm.byes === 1 ? "" : "s"} will be used — those {noun} advance
-                automatically.
-              </li>
-            )}
-            {confirm.dropped.length > 0 && (
-              <li>
-                Incomplete and left out: {confirm.dropped.join(", ")}.
-              </li>
-            )}
-          </ul>
-          <div className="mt-3 flex gap-2">
-            <PrimaryButton disabled={busy} onClick={() => act("start", { force: true })}>
-              Start anyway
-            </PrimaryButton>
-            <GhostButton onClick={() => setConfirm(null)}>Keep waiting</GhostButton>
-          </div>
-        </Card>
+      {games.length > 6 && (
+        <button type="button" onClick={() => setAll((x) => !x)} className="mt-3 text-sm text-[#c4b5fd] underline">
+          {all ? "Show fewer" : `Show all ${games.length}`}
+        </button>
       )}
+    </section>
+  );
+}
 
-      {/* ---------- bracket ---------- */}
-      {t.rounds.length > 0 && (
-        <section>
-          <div className="mb-3 flex items-baseline justify-between">
-            <p className="text-[11px] uppercase tracking-[0.25em] text-[#c4b5fd]">Bracket</p>
-            {t.byes > 0 && (
-              <p className="text-xs text-mist">
-                {t.byes} BYE{t.byes === 1 ? "" : "s"} — those {noun} advance automatically
-              </p>
+function StandingsTab({ t, meId, onDone }: { t: TournamentView; meId: string; onDone: () => Promise<void> }) {
+  const views = t.sections.filter((s) => s.kind !== "list");
+  const [pick, setPick] = useState<string | null>(null);
+  if (!views.length) return <p className="text-sm text-mist">Nothing to show yet.</p>;
+  const current = views.find((s) => s.id === pick) ?? views.find((s) => s.id === "playoffs" && t.phase === "playoffs") ?? views[0];
+  return (
+    <div className="space-y-4">
+      {views.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {views.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setPick(s.id)}
+              className={cn(
+                "rounded-full border px-4 py-2 text-sm font-medium",
+                current.id === s.id ? "border-[#a78bfa] bg-[#a78bfa]/15 text-white" : "border-white/10 text-mist",
+              )}
+            >
+              {s.title}
+            </button>
+          ))}
+        </div>
+      )}
+      {current.kind === "table" ? (
+        <StandingsTable sec={current} meId={meId} ppt={t.playersPerTeam} />
+      ) : current.kind === "bracket" ? (
+        <div className="hide-scrollbar flex gap-4 overflow-x-auto pb-3">
+          {current.rounds.map((r) => (
+            <div key={r.round} className="flex w-64 shrink-0 flex-col">
+              <p className="mb-3 text-sm font-semibold text-white">{r.name}</p>
+              <div className="flex flex-1 flex-col justify-around gap-3">
+                {r.games.map((g) => (
+                  <MatchCard key={g.id} g={g} meId={meId} ppt={t.playersPerTeam} onDone={onDone} compact />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {current.kind === "bracket" && current.rounds.length > 2 && (
+        <p className="text-xs text-mist">Swipe sideways to see every round →</p>
+      )}
+    </div>
+  );
+}
+
+function StandingsTable({
+  sec,
+  meId,
+  ppt,
+}: {
+  sec: Extract<TournamentSection, { kind: "table" }>;
+  meId: string;
+  ppt: number;
+}) {
+  const mine = (team: TeamView) => team.members.some((m) => m.id === meId);
+  const framesShown = sec.rounds.some((r) => r.games.some((g) => g.bestOf > 1));
+  const played = sec.rounds.flatMap((r) => r.games).filter((g) => g.status === "completed").length;
+  const total = sec.rounds.flatMap((r) => r.games).length;
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-white/10">
+      <table className="w-full min-w-[320px] text-left text-base">
+        <thead className="bg-white/[0.03] text-xs uppercase tracking-wide text-mist">
+          <tr>
+            <th className="w-12 px-3 py-3 font-medium">#</th>
+            <th className="px-3 py-3 font-medium">{ppt === 1 ? "Player" : "Team"}</th>
+            <th className="px-2 py-3 text-center font-medium" title="Won">Won</th>
+            <th className="px-2 py-3 text-center font-medium" title="Lost">Lost</th>
+            {framesShown && <th className="px-2 py-3 text-center font-medium">Frames</th>}
+            <th className="px-3 py-3 text-right font-medium">Points</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sec.rows.map((r, i) => (
+            <tr
+              key={r.teamId}
+              className={cn(
+                "border-t border-white/[0.06]",
+                sec.cuts.includes(i + 1) && "border-b-2 border-b-[#a78bfa]/60",
+                r.through && "bg-teal/[0.07]",
+                mine(r.team) && "bg-[#a78bfa]/[0.1]",
+              )}
+            >
+              <td className="px-3 py-3 tabular-nums text-mist">{r.tied ? `=${r.position}` : r.position}</td>
+              <td className="px-3 py-3 font-medium text-white">
+                {teamLabel(r.team, ppt)}
+                {mine(r.team) && <span className="ml-1.5 text-xs text-[#c4b5fd]">(you)</span>}
+                {r.through && <span className="ml-1.5 text-xs font-semibold text-teal">✓ through</span>}
+              </td>
+              <td className="px-2 py-3 text-center tabular-nums text-white">{r.won}</td>
+              <td className="px-2 py-3 text-center tabular-nums text-mist">{r.lost}</td>
+              {framesShown && (
+                <td className="px-2 py-3 text-center tabular-nums text-mist">
+                  {r.framesFor}–{r.framesAgainst}
+                </td>
+              )}
+              <td className="px-3 py-3 text-right font-display font-bold tabular-nums text-white">{r.points}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="border-t border-white/[0.06] px-3 py-2.5 text-xs text-mist">
+        A win = 3 points. The purple line: {sec.cutNote.toLowerCase()}. {played} of {total} matches played.
+      </p>
+    </div>
+  );
+}
+
+function AllMatches({ t, meId, onDone }: { t: TournamentView; meId: string; onDone: () => Promise<void> }) {
+  const [onlyMine, setOnlyMine] = useState(false);
+  const groups = t.sections
+    .map((s) => ({
+      title: s.title,
+      rounds:
+        s.kind === "list"
+          ? [{ round: 1, name: "", games: s.games }]
+          : s.rounds.map((r) => ({ round: r.round, name: r.name, games: r.games })),
+    }))
+    .map((s) => ({
+      ...s,
+      rounds: s.rounds
+        .map((r) => ({ ...r, games: r.games.filter((g) => !g.isBye && (!onlyMine || g.viewer.teamId)) }))
+        .filter((r) => r.games.length),
+    }))
+    .filter((s) => s.rounds.length);
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-2">
+        {[
+          [false, "Everyone"],
+          [true, "Only mine"],
+        ].map(([v, label]) => (
+          <button
+            key={String(v)}
+            type="button"
+            onClick={() => setOnlyMine(v as boolean)}
+            className={cn(
+              "rounded-full border px-4 py-2 text-sm font-medium",
+              onlyMine === v ? "border-[#a78bfa] bg-[#a78bfa]/15 text-white" : "border-white/10 text-mist",
             )}
-          </div>
-          <div className="hide-scrollbar flex gap-5 overflow-x-auto pb-3">
-            {t.rounds.map((r) => (
-              <div key={r.round} className="flex w-72 shrink-0 flex-col">
-                <p className="mb-3 text-sm font-semibold text-white">{r.name}</p>
-                <div className="flex flex-1 flex-col justify-around gap-4">
+          >
+            {label as string}
+          </button>
+        ))}
+      </div>
+      {groups.length === 0 && <p className="text-sm text-mist">No matches to show.</p>}
+      {groups.map((s) => (
+        <section key={s.title}>
+          {t.sections.length > 1 && <h2 className="mb-3 font-display text-lg font-semibold text-white">{s.title}</h2>}
+          <div className="space-y-5">
+            {s.rounds.map((r) => (
+              <div key={r.round}>
+                {r.name && <p className="mb-2 text-sm font-semibold text-mist">{r.name}</p>}
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {r.games.map((g) => (
-                    <BracketMatch key={g.id} g={g} meId={meId} ppt={t.playersPerTeam} onDone={refetch} />
+                    <MatchCard key={g.id} g={g} meId={meId} ppt={t.playersPerTeam} onDone={onDone} />
                   ))}
                 </div>
               </div>
             ))}
           </div>
         </section>
+      ))}
+    </div>
+  );
+}
+
+function PlayersTab({
+  t,
+  meId,
+  busy,
+  draft,
+  taken,
+  onAct,
+  onAdd,
+  onClearDraft,
+  onError,
+}: {
+  t: TournamentView;
+  meId: string;
+  busy: boolean;
+  draft: PickedPlayer[];
+  taken: Set<string>;
+  onAct: (action: string, body?: Record<string, unknown>) => Promise<boolean>;
+  onAdd: (p: PickedPlayer) => void;
+  onClearDraft: () => void;
+  onError: (e: string) => void;
+}) {
+  const v = t.viewer;
+  const ppt = t.playersPerTeam;
+  const canAdd = v.canManage && t.teams.length < t.capacityTeams;
+  return (
+    <div className="space-y-5">
+      {canAdd && (
+        <Card>
+          <p className="text-base font-semibold text-white">Add {ppt === 1 ? "a player" : "a team"}</p>
+          {ppt > 1 && (
+            <p className="mt-1 text-sm text-mist">
+              Pick two people{draft.length === 1 ? ` — ${draft[0].nickname} needs a partner` : ""}.
+            </p>
+          )}
+          <div className="mt-3">
+            <PlayerPicker exclude={new Set()} onPick={onAdd} disabled={busy} />
+          </div>
+          <p className="mb-2 mt-4 text-sm text-mist">Not a member? Type their name (no points for guest matches):</p>
+          <GuestAdder onAdd={onAdd} disabled={busy} />
+          {draft.length > 0 && (
+            <button type="button" onClick={onClearDraft} className="mt-2 text-sm text-mist underline">
+              Clear unfinished team
+            </button>
+          )}
+        </Card>
       )}
 
-      {error && <Notice tone="error">{error}</Notice>}
-
-      <div className="flex flex-wrap items-center gap-3">
-        {open && v.canLeave && !v.isOrganizer && (
-          <GhostButton danger disabled={busy} onClick={async () => (await act("respond", { accept: false })) && router.push("/play")}>
-            Leave tournament
-          </GhostButton>
-        )}
-        {v.canCancel && (
-          <GhostButton
-            danger
-            disabled={busy}
-            onClick={() => {
-              if (window.confirm("Cancel this tournament for everyone?")) void act("cancel");
-            }}
-          >
-            Cancel tournament
-          </GhostButton>
-        )}
-        <Link href="/play" className="text-sm text-mist hover:text-white">
-          ← Back to Play
-        </Link>
+      <p className="text-sm text-mist">
+        {t.teams.length} of {t.capacityTeams} places filled.
+      </p>
+      {t.teams.length === 0 && <p className="text-sm text-mist">Nobody added yet.</p>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {t.teams.map((team, i) => (
+          <Card key={team.id} className={cn("p-4", team.complete && "border-teal/30")}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-semibold text-mist">{ppt === 1 ? `#${i + 1}` : `Team ${i + 1}`}</p>
+              {t.status === "registration_open" &&
+                (team.complete ? (
+                  <span className="text-xs font-semibold text-teal">✓ Ready</span>
+                ) : (
+                  <span className="text-xs font-semibold text-[#ffb066]">Waiting to accept</span>
+                ))}
+            </div>
+            <div className="space-y-3">
+              {team.members.map((m) => (
+                <PlayerLine
+                  key={m.id}
+                  player={m}
+                  status={t.status === "registration_open" ? m.status : undefined}
+                  you={m.id === meId}
+                  right={
+                    v.canManage ? (
+                      <button
+                        onClick={() =>
+                          m.guest ? onAct("remove-guest", { guestId: m.id }) : onAct("remove-member", { playerId: m.id })
+                        }
+                        disabled={busy}
+                        aria-label={`Remove ${m.nickname}`}
+                        className="rounded-lg px-2.5 py-1 text-xs text-mist hover:bg-red-400/20 hover:text-red-300"
+                      >
+                        Remove
+                      </button>
+                    ) : null
+                  }
+                />
+              ))}
+            </div>
+            {v.canManage && team.members.length < ppt && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-[#ffc98f]">This team needs {ppt - team.members.length} more player.</p>
+                <PlayerPicker
+                  exclude={new Set()}
+                  placeholder="Add a partner…"
+                  onPick={(p) =>
+                    taken.has(p.id)
+                      ? onError(`${p.nickname} is already in a team.`)
+                      : onAct("add-member", { teamId: team.id, playerId: p.id })
+                  }
+                  disabled={busy}
+                />
+                <GuestAdder
+                  placeholder="Or a guest's name"
+                  disabled={busy}
+                  onAdd={(p) => onAct("add-guest", { teamId: team.id, name: p.nickname })}
+                />
+              </div>
+            )}
+          </Card>
+        ))}
       </div>
     </div>
   );
+}
+
+/** how it's played — and, before the start, a way for the organizer to change it */
+function FormatCard({
+  t,
+  busy,
+  onSave,
+}: {
+  t: TournamentView;
+  busy: boolean;
+  onSave: (s: TournamentSettings) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<TournamentSettings>(t.settings);
+  const noun = t.playersPerTeam === 1 ? "player" : "team";
+  const summary = describe(t.settings, t.capacityTeams);
+  return (
+    <Card>
+      {!editing ? (
+        <>
+          <p className="text-base font-semibold text-white">{formatLine(t.settings)}</p>
+          <p className="mt-1 text-sm text-mist">
+            {summary.totalMatches} matches · {summary.perEntry}. Play at your own pace.
+          </p>
+          <ol className="mt-3 space-y-1 text-sm text-mist">
+            {summary.stages.map((st, i) => (
+              <li key={i}>
+                {i + 1}. <span className="text-white">{st.title}</span> — {st.detail}
+              </li>
+            ))}
+          </ol>
+          {t.viewer.canEditFormat && (
+            <GhostButton
+              className="mt-4"
+              onClick={() => {
+                setDraft(t.settings);
+                setEditing(true);
+              }}
+            >
+              Change how it&apos;s played
+            </GhostButton>
+          )}
+        </>
+      ) : (
+        <>
+          <FormatPicker value={draft} onChange={setDraft} entries={t.capacityTeams} noun={noun} />
+          <div className="mt-5 flex gap-2">
+            <PrimaryButton
+              className="px-6 py-3"
+              disabled={busy}
+              onClick={async () => {
+                if (await onSave(draft)) setEditing(false);
+              }}
+            >
+              Save
+            </PrimaryButton>
+            <GhostButton onClick={() => setEditing(false)}>Cancel</GhostButton>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** players level on points at a line that matters — they play it out */
+function TieCard({ tie, ppt }: { tie: PendingTie; ppt: number }) {
+  const names = tie.teams.map((x) => teamLabel(x, ppt));
+  const list = names.length > 2 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join(" and ");
+  return (
+    <Card className="border-[#ffb066]/40 bg-[#ff9d3d]/[0.06]">
+      <p className="text-base font-semibold text-white">⚖️ {list} are level on points</p>
+      <p className="mt-1 text-sm text-mist">
+        {tie.playoffRound > 1 ? "Still level — so another round: " : ""}
+        {tie.teams.length === 2
+          ? "they play one more match to decide it."
+          : "each plays the others once. Most wins goes through."}{" "}
+        {tie.matchesLeft > 0 && `${tie.matchesLeft} tie-breaker match${tie.matchesLeft === 1 ? "" : "es"} below.`}
+      </p>
+    </Card>
+  );
+}
+
+/* ============================ the match card ============================ */
+
+function sectionGames(sec: TournamentSection): GameView[] {
+  return sec.kind === "list" ? sec.games : sec.rounds.flatMap((r) => r.games);
 }
 
 function teamLabel(team: TeamView | null, ppt: number): string {
@@ -385,19 +911,29 @@ function teamLabel(team: TeamView | null, ppt: number): string {
   return ppt > 1 ? `Team ${team.name}` : team.name;
 }
 
-function BracketMatch({
+/**
+ * One match. Names in big text, a status, and at most one obvious button.
+ * Entering a result: "Who won?" → (best-of matches) "What was the score?".
+ */
+function MatchCard({
   g,
   meId,
   ppt,
   onDone,
+  big,
+  compact,
 }: {
   g: GameView;
   meId: string;
   ppt: number;
   onDone: () => Promise<void>;
+  big?: boolean;
+  compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"idle" | "table" | "result" | "fix">("idle");
+  const tables = useContext(TablesContext);
   const v = g.viewer;
 
   async function act(action: string, body: Record<string, unknown> = {}) {
@@ -405,148 +941,260 @@ function BracketMatch({
     setError(null);
     const r = await apiPost(`/api/friends/games/${g.id}/${action}`, body);
     if (!r.ok) setError(r.error);
+    else setMode("idle");
     await onDone();
     setBusy(false);
   }
 
   const mine = (team: TeamView | null) => !!team?.members.some((m) => m.id === meId);
   const reported = g.teamA?.id === g.reportedWinnerTeamId ? g.teamA : g.teamB?.id === g.reportedWinnerTeamId ? g.teamB : null;
+  const canEnter = (v.canSettle || v.canReport) && g.status !== "completed" && g.resultStatus !== "reported";
+  const resultAction = v.canSettle ? "settle" : "report";
+
+  const status =
+    g.isBye
+      ? { text: "Free pass", cls: "bg-white/10 text-mist" }
+      : g.status === "completed"
+        ? { text: "Finished", cls: "bg-white/10 text-mist" }
+        : g.status === "in_progress"
+          ? { text: g.tableName ? `Playing · ${g.tableName}` : "Playing", cls: "bg-teal/20 text-teal" }
+          : g.status === "ready"
+            ? { text: "Ready", cls: "bg-[#a78bfa]/20 text-[#c4b5fd]" }
+            : g.status === "cancelled"
+              ? { text: "Cancelled", cls: "bg-white/10 text-mist" }
+              : { text: "Waiting", cls: "bg-white/5 text-mist" };
 
   return (
     <div
       className={cn(
-        "rounded-xl border p-3",
-        g.status === "in_progress" || g.status === "ready"
-          ? "border-[#a78bfa]/50 bg-[#a78bfa]/[0.05]"
-          : "border-white/10 bg-white/[0.025]",
-        g.isBye && "opacity-75",
+        "rounded-2xl border p-4",
+        g.status === "in_progress" ? "border-teal/40 bg-teal/[0.04]" : g.status === "ready" ? "border-[#a78bfa]/40 bg-[#a78bfa]/[0.04]" : "border-white/10 bg-white/[0.025]",
+        big && "border-0 bg-transparent p-0",
+        compact && "p-3",
       )}
     >
-      {[g.teamA, g.teamB].map((team, i) => (
-        <div
-          key={i}
-          className={cn(
-            "flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-sm",
-            i === 0 && "mb-1",
-            g.winnerTeamId && team && g.winnerTeamId === team.id
-              ? "bg-[#a78bfa]/15 font-semibold text-white"
-              : "text-mist",
-            g.winnerTeamId && team && g.winnerTeamId !== team.id && "line-through decoration-white/20",
-          )}
-        >
-          <span className="truncate">
-            {team ? teamLabel(team, ppt) : g.isBye ? "BYE" : "TBD"}
-            {mine(team) && <span className="ml-1.5 text-[10px] text-[#c4b5fd]">(you)</span>}
-          </span>
-          {g.winnerTeamId && team && g.winnerTeamId === team.id && <span aria-hidden>🏆</span>}
-        </div>
-      ))}
-
-      <p className="mt-2 text-[11px] text-mist">
-        {g.isBye
-          ? "BYE — automatically advances"
-          : g.status === "waiting_for_players"
-            ? "Waiting for earlier matches"
-            : g.status === "ready"
-              ? "Ready to play"
-              : g.status === "in_progress"
-                ? "In progress"
-                : g.status === "completed"
-                  ? "Completed"
-                  : "Cancelled"}
-      </p>
-
-      {g.guestMatch && !g.isBye && g.status !== "cancelled" && (
-        <p className="mt-1 text-[11px] text-mist">Guest match · no Friends League points</p>
-      )}
-
-      {g.resultStatus === "reported" && (
-        <p className="mt-2 rounded-lg bg-[#ff9d3d]/10 px-2.5 py-1.5 text-[11px] text-[#ffc98f]">
-          {g.reportedBy?.nickname} reported {reported ? teamLabel(reported, ppt) : "a winner"}.{" "}
-          {v.canConfirm ? "Is that right?" : "Waiting for confirmation."}
-        </p>
-      )}
-      {g.resultStatus === "disputed" && (
-        <p className="mt-2 rounded-lg bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
-          Result disputed — report again or ask the organizer to settle.
-        </p>
-      )}
-
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {v.canStart && (
-          <SmallButton disabled={busy} onClick={() => act("start")} primary>
-            Start match
-          </SmallButton>
-        )}
-        {v.canConfirm && (
-          <>
-            <SmallButton disabled={busy} onClick={() => act("confirm")} primary>
-              Confirm
-            </SmallButton>
-            <SmallButton disabled={busy} onClick={() => act("dispute")}>
-              Dispute
-            </SmallButton>
-          </>
-        )}
-        {v.canReport &&
-          [g.teamA, g.teamB].map(
-            (team) =>
-              team && (
-                <SmallButton key={team.id} disabled={busy} onClick={() => act("report", { winnerTeamId: team.id })}>
-                  {shortName(team)} won
-                </SmallButton>
-              ),
-          )}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="truncate text-xs text-mist">
+          {g.roundName}
+          {g.bestOf > 1 && ` · ${bestOfLabel(g.bestOf)}`}
+        </span>
+        <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold", status.cls)}>{status.text}</span>
       </div>
-      {v.canSettle && g.status !== "completed" && !v.canReport && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {[g.teamA, g.teamB].map(
-            (team) =>
-              team && (
-                <SmallButton key={team.id} disabled={busy} onClick={() => act("settle", { winnerTeamId: team.id })}>
-                  Settle: {shortName(team)}
-                </SmallButton>
-              ),
+
+      {[g.teamA, g.teamB].map((team, i) => {
+        const won = !!g.winnerTeamId && !!team && g.winnerTeamId === team.id;
+        const lost = !!g.winnerTeamId && !!team && g.winnerTeamId !== team.id;
+        return (
+          <div
+            key={i}
+            className={cn(
+              "flex items-center justify-between gap-2 rounded-xl px-3",
+              big ? "py-2.5 text-lg" : compact ? "py-1.5 text-sm" : "py-2 text-base",
+              won ? "bg-[#a78bfa]/15 font-semibold text-white" : lost ? "text-mist" : "text-white",
+            )}
+          >
+            <span className="truncate">
+              {team ? teamLabel(team, ppt) : g.isBye ? "—" : "To be decided"}
+              {mine(team) && <span className="ml-1.5 text-xs text-[#c4b5fd]">(you)</span>}
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {g.status === "completed" && !g.isBye && g.bestOf > 1 && (
+                <span className="font-display tabular-nums">{i === 0 ? g.scoreA : g.scoreB}</span>
+              )}
+              {won && <span aria-hidden>🏆</span>}
+            </span>
+          </div>
+        );
+      })}
+
+      {/* waiting on the other side */}
+      {g.resultStatus === "reported" && (
+        <div className="mt-3 rounded-xl bg-[#ff9d3d]/10 p-3">
+          <p className="text-sm text-[#ffc98f]">
+            {g.reportedBy?.nickname} says <strong>{reported ? teamLabel(reported, ppt) : "?"}</strong> won
+            {g.bestOf > 1 && g.reportedScoreA != null ? ` ${g.reportedScoreA}–${g.reportedScoreB}` : ""}.
+          </p>
+          {v.canConfirm ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <ActionButton primary disabled={busy} onClick={() => act("confirm")}>
+                ✓ Yes, that&apos;s right
+              </ActionButton>
+              <ActionButton disabled={busy} onClick={() => act("dispute")}>
+                ✗ No, that&apos;s wrong
+              </ActionButton>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-mist">Waiting for the other side to say it&apos;s right.</p>
           )}
         </div>
       )}
-      {v.canSettle && v.canReport && g.status !== "completed" && (
-        <details className="mt-2 text-[11px] text-mist">
-          <summary className="cursor-pointer">Organizer options</summary>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {[g.teamA, g.teamB].map(
-              (team) =>
-                team && (
-                  <SmallButton key={team.id} disabled={busy} onClick={() => act("settle", { winnerTeamId: team.id })}>
-                    Settle: {shortName(team)}
-                  </SmallButton>
-                ),
-            )}
-          </div>
-        </details>
+      {g.resultStatus === "disputed" && g.status !== "completed" && (
+        <p className="mt-3 rounded-xl bg-red-400/10 p-3 text-sm text-red-300">
+          The result was questioned. Enter it again{v.canSettle ? "" : ", or ask the organizer"}.
+        </p>
       )}
-      {error && <p className="mt-2 text-[11px] text-red-300">{error}</p>}
+
+      {/* main buttons */}
+      {mode === "idle" && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {v.canStart && g.status === "ready" && (
+            <ActionButton primary disabled={busy} onClick={() => (tables.length ? setMode("table") : act("start"))}>
+              ▶ Start
+            </ActionButton>
+          )}
+          {canEnter && (
+            <ActionButton primary={g.status === "in_progress"} disabled={busy} onClick={() => setMode("result")}>
+              Enter result
+            </ActionButton>
+          )}
+          {v.canChange && (
+            <button type="button" onClick={() => setMode("fix")} className="px-1 text-xs text-mist underline">
+              Fix result
+            </button>
+          )}
+        </div>
+      )}
+
+      {mode === "table" && (
+        <div className="mt-3">
+          <p className="mb-2 text-sm font-semibold text-white">Which table?</p>
+          <div className="flex flex-wrap gap-2">
+            {tables.map((name) => (
+              <ActionButton key={name} disabled={busy} onClick={() => act("start", { tableName: name })}>
+                {name}
+              </ActionButton>
+            ))}
+            <ActionButton disabled={busy} onClick={() => act("start")}>
+              Doesn&apos;t matter
+            </ActionButton>
+          </div>
+          <button type="button" onClick={() => setMode("idle")} className="mt-2 text-xs text-mist underline">
+            Back
+          </button>
+        </div>
+      )}
+
+      {(mode === "result" || mode === "fix") && (
+        <ResultEntry
+          g={g}
+          ppt={ppt}
+          busy={busy}
+          fixing={mode === "fix"}
+          onSave={(body) => act(mode === "fix" ? "settle" : resultAction, body)}
+          onUndo={() => {
+            if (window.confirm("Undo this result? The match goes back to not played.")) void act("undo");
+          }}
+          onBack={() => setMode("idle")}
+        />
+      )}
+
+      {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
     </div>
   );
 }
 
-function shortName(team: TeamView): string {
-  return team.name.length > 16 ? team.name.slice(0, 15) + "…" : team.name;
+/** "Who won?" — then, for a best-of match, "What was the score?" */
+function ResultEntry({
+  g,
+  ppt,
+  busy,
+  fixing,
+  onSave,
+  onUndo,
+  onBack,
+}: {
+  g: GameView;
+  ppt: number;
+  busy: boolean;
+  fixing: boolean;
+  onSave: (body: Record<string, unknown>) => void;
+  onUndo: () => void;
+  onBack: () => void;
+}) {
+  const [winner, setWinner] = useState<"a" | "b" | null>(null);
+  const sides = [g.teamA, g.teamB];
+  const pickWinner = (i: 0 | 1) => {
+    const team = sides[i]!;
+    if (g.bestOf <= 1) onSave({ winnerTeamId: team.id });
+    else setWinner(i === 0 ? "a" : "b");
+  };
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      {winner === null ? (
+        <>
+          <p className="mb-2 text-sm font-semibold text-white">Who won?</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {sides.map((team, i) =>
+              team ? (
+                <ActionButton
+                  key={team.id}
+                  big
+                  disabled={busy || (fixing && g.bestOf <= 1 && g.winnerTeamId === team.id)}
+                  onClick={() => pickWinner(i as 0 | 1)}
+                >
+                  {teamLabel(team, ppt)}
+                </ActionButton>
+              ) : null,
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="mb-1 text-sm font-semibold text-white">
+            {teamLabel(sides[winner === "a" ? 0 : 1], ppt)} won. What was the score?
+          </p>
+          <p className="mb-2 text-xs text-mist">
+            {bestOfLabel(g.bestOf)} — first to {framesToWin(g.bestOf)} frames.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {winningScores(g.bestOf).map(([w, l]) => {
+              const a = winner === "a" ? w : l;
+              const b = winner === "a" ? l : w;
+              const same = fixing && g.scoreA === a && g.scoreB === b;
+              return (
+                <ActionButton
+                  key={`${w}-${l}`}
+                  big
+                  disabled={busy || same}
+                  onClick={() => onSave({ winnerTeamId: sides[winner === "a" ? 0 : 1]!.id, scoreA: a, scoreB: b })}
+                >
+                  {w} – {l}
+                </ActionButton>
+              );
+            })}
+          </div>
+        </>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-4">
+        <button type="button" onClick={winner === null ? onBack : () => setWinner(null)} className="text-xs text-mist underline">
+          Back
+        </button>
+        {fixing && (
+          <button type="button" disabled={busy} onClick={onUndo} className="text-xs text-red-300 underline">
+            Undo result (not played)
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
-function SmallButton({
+function ActionButton({
   children,
   primary,
+  big,
   ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean; big?: boolean }) {
   return (
     <button
+      type="button"
       {...rest}
       className={cn(
-        "rounded-full px-3 py-1 text-[11px] font-semibold transition-colors disabled:opacity-40",
+        "rounded-xl font-semibold transition-colors disabled:opacity-40",
+        big ? "px-5 py-3 text-base" : "px-4 py-2.5 text-sm",
         primary
           ? "bg-[linear-gradient(120deg,#a78bfa,#ec4899)] text-navy-950"
-          : "border border-white/15 text-white hover:border-[#a78bfa]/60 hover:bg-[#a78bfa]/10",
+          : "border border-white/20 text-white hover:border-[#a78bfa]/60 hover:bg-[#a78bfa]/10",
       )}
     >
       {children}

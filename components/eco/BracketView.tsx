@@ -16,10 +16,13 @@ export function BracketView({
   bracket,
   players,
   championId,
+  bestOf = {},
 }: {
   bracket: BracketMatch[];
   players: PMap;
   championId: string | null;
+  /** match length per round name */
+  bestOf?: Record<string, number>;
 }) {
   const rounds = groupRounds(bracket);
   if (!rounds.length)
@@ -43,6 +46,11 @@ export function BracketView({
               >
                 <div className="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.16em] text-teal">
                   {r[0]?.roundName ?? `Round ${ri + 1}`}
+                  {(bestOf[r[0]?.roundName ?? ""] ?? 1) > 1 && (
+                    <span className="ml-1.5 normal-case tracking-normal text-mist">
+                      · best of {bestOf[r[0]!.roundName]}
+                    </span>
+                  )}
                 </div>
                 {r.map((m, mi) => (
                   <div
