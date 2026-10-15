@@ -1,7 +1,7 @@
 /* ============================================================
    Automatic loyalty points for table time.
 
-   Points are owed for a booking only while it is PAID, not cancelled
+   Points are owed for a booking (or a daily-log session) only while it is PAID, not cancelled
    and linked to a registered player. Rather than "add points when
    someone pays" (which goes wrong on un-pay, extend, re-price, cancel
    and delete), this recomputes what every booking of that player in
@@ -83,10 +83,21 @@ export async function syncPlayerMonthPoints(
     const { eligible, rule, since } = await loadRule(c, playerId);
 
     const { rows: bookings } = await c.query<BookingRow>(
-      `SELECT id, reference, to_char(date, 'YYYY-MM-DD') AS day, total_amount, status, payment_status
-         FROM bookings
-        WHERE player_id = $1 AND to_char(date, 'YYYY-MM') = $2
-        ORDER BY date, start_time, id`,
+      // bookings plus daily-log sessions (always collected at the counter)
+      `SELECT id, reference, day, total_amount, status, payment_status FROM (
+         SELECT id, reference, to_char(date, 'YYYY-MM-DD') AS day, total_amount,
+                status::text AS status, payment_status, start_time
+           FROM bookings b
+          WHERE player_id = $1 AND to_char(date, 'YYYY-MM') = $2
+            -- a reservation that was logged earns through its log entry instead
+            AND NOT EXISTS (SELECT 1 FROM play_logs l WHERE l.booking_id = b.id)
+         UNION ALL
+         SELECT id, table_name AS reference, to_char(date, 'YYYY-MM-DD'), amount,
+                'CONFIRMED', 'paid', start_time
+           FROM play_logs
+          WHERE player_id = $1 AND to_char(date, 'YYYY-MM') = $2
+       ) t
+       ORDER BY day, start_time, id`,
       [playerId, month],
     );
 

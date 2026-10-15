@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Tabs } from "./Primitives";
+import { DailyLogTab } from "./DailyLogTab";
 import { cn, formatDateShort, formatLKR, label12h, timeAgo } from "@/lib/utils";
 import {
   EXPENSE_CATEGORIES,
@@ -44,6 +45,7 @@ type Tab =
   | "membership"
   | "tables"
   | "bookings"
+  | "daily"
   | "finance"
   | "campaign"
   | "audit";
@@ -160,6 +162,7 @@ export function AdminConsole() {
             { value: "membership", label: "Membership" },
             { value: "tables", label: "Tables" },
             { value: "bookings", label: "Bookings" },
+            { value: "daily", label: "Daily log" },
             ...(me?.role === "admin"
               ? [
                   { value: "finance", label: "Finance" },
@@ -181,6 +184,7 @@ export function AdminConsole() {
         {tab === "membership" && <MembershipTab headers={headers} isAdmin={me?.role === "admin"} />}
         {tab === "tables" && <TablesTab headers={headers} />}
         {tab === "bookings" && <BookingsTab headers={headers} />}
+        {tab === "daily" && <DailyLogTab headers={headers} isAdmin={me?.role === "admin"} />}
         {tab === "finance" &&
           (me?.role === "admin" ? (
             <FinanceTab headers={headers} />
@@ -1963,8 +1967,9 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
 
   const list = bookings ?? [];
   const openSessions = list.filter((b) => b.checkedInAt && !b.checkedOutAt);
+  // online reservations aren't income — the Daily log is
   const revenue = list
-    .filter((b) => b.status !== "CANCELLED")
+    .filter((b) => b.status !== "CANCELLED" && b.origin !== "online")
     .reduce((s, b) => s + b.totalAmount, 0);
   const unpaid = list.filter(
     (b) => b.status !== "CANCELLED" && b.paymentStatus === "unpaid",
@@ -2065,7 +2070,7 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
               <MiniStat k="Shown" v={String(list.length)} />
               <MiniStat k="Open sessions" v={String(openSessions.length)} />
               <MiniStat k="Unpaid" v={String(unpaid)} />
-              <MiniStat k="Revenue" v={formatLKR(revenue)} />
+              <MiniStat k="Staff-entered income" v={formatLKR(revenue)} />
             </div>
             <div className="overflow-x-auto rounded-2xl border border-white/10">
               <table className="w-full min-w-[860px] text-left text-sm">

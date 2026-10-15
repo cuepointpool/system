@@ -420,6 +420,18 @@ export interface FinanceSummary {
   daily: DailyLine[]; // last 30 days, newest first
 }
 
+/**
+ * Table income, one row per session. The daily play log is the income;
+ * online bookings are reservations only and never count. Older sessions
+ * staff entered as bookings (walk-ins, logged visits) still do.
+ */
+const TABLE_INCOME_SQL = `
+  SELECT date, total_amount AS gross,
+         CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END AS collected
+    FROM bookings WHERE status <> 'CANCELLED' AND origin <> 'online'
+  UNION ALL
+  SELECT date, amount, amount FROM play_logs`;
+
 export async function financeSummary(): Promise<FinanceSummary> {
   const [contribByPartner, expenseAgg, revAgg, daily] = await Promise.all([
     query<{ partner_id: string; name: string; total: string }>(
@@ -436,9 +448,8 @@ export async function financeSummary(): Promise<FinanceSummary> {
          FROM business_expenses GROUP BY source`,
     ),
     query<{ gross: string; collected: string }>(
-      `SELECT COALESCE(SUM(total_amount), 0) AS gross,
-              COALESCE(SUM(total_amount) FILTER (WHERE payment_status = 'paid'), 0) AS collected
-         FROM bookings WHERE status <> 'CANCELLED'`,
+      `SELECT COALESCE(SUM(gross), 0) AS gross, COALESCE(SUM(collected), 0) AS collected
+         FROM (${TABLE_INCOME_SQL}) t`,
     ),
     query<{
       date: Date | string;
@@ -447,11 +458,11 @@ export async function financeSummary(): Promise<FinanceSummary> {
       bookings: string;
     }>(
       `SELECT date,
-              COALESCE(SUM(total_amount), 0) AS gross,
-              COALESCE(SUM(total_amount) FILTER (WHERE payment_status = 'paid'), 0) AS collected,
+              COALESCE(SUM(gross), 0) AS gross,
+              COALESCE(SUM(collected), 0) AS collected,
               COUNT(*) AS bookings
-         FROM bookings
-        WHERE status <> 'CANCELLED' AND date >= CURRENT_DATE - INTERVAL '30 days'
+         FROM (${TABLE_INCOME_SQL}) t
+        WHERE date >= CURRENT_DATE - INTERVAL '30 days'
         GROUP BY date ORDER BY date DESC`,
     ),
   ]);

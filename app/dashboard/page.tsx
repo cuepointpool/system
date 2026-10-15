@@ -5,6 +5,8 @@ import { Dashboard } from "@/components/eco/Dashboard";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { FriendsLeagueCard } from "@/components/friends/FriendsLeagueCard";
 import { getFriendPoints } from "@/lib/friends/store";
+import { PlayTimeCard } from "@/components/eco/PlayTimeCard";
+import { playTimeFor } from "@/lib/play-logs";
 import {
   getLoyaltyForPlayer,
   getMembershipPlans,
@@ -25,12 +27,13 @@ export default async function DashboardPage() {
   // staff & admin use the operations console, not a player dashboard
   if (viewer.role !== "player") redirect("/admin");
 
-  const [view, loyalty, plans, tournaments, friendPoints] = await Promise.all([
+  const [view, loyalty, plans, tournaments, friendPoints, playTime] = await Promise.all([
     getPlayerProfileView(viewer.slug),
     getLoyaltyForPlayer(viewer.id),
     getMembershipPlans(),
     getTournaments(),
     getFriendPoints(viewer.id),
+    playTimeFor(viewer.id),
   ]);
   if (!view) redirect("/players");
   const membershipPlan =
@@ -65,7 +68,8 @@ export default async function DashboardPage() {
         }
         intro="Everything that matters between visits — where you rank, who you play next, what you've earned."
       />
-      <div className="mx-auto max-w-6xl px-5 pb-6 md:px-8">
+      <div className="mx-auto grid max-w-6xl gap-5 px-5 pb-6 md:grid-cols-2 md:px-8">
+        <PlayTimeCard playTime={playTime} />
         <FriendsLeagueCard points={friendPoints} />
       </div>
       <Dashboard
