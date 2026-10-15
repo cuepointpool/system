@@ -570,3 +570,12 @@ CREATE TABLE IF NOT EXISTS play_logs (
 CREATE INDEX IF NOT EXISTS play_logs_date_idx ON play_logs (date);
 CREATE INDEX IF NOT EXISTS play_logs_player_idx ON play_logs (player_id);
 CREATE UNIQUE INDEX IF NOT EXISTS play_logs_booking_uq ON play_logs (booking_id) WHERE booking_id IS NOT NULL;
+
+-- ---------------------------------------------------------- player photos ---
+CREATE TABLE IF NOT EXISTS player_avatars (
+  player_id  TEXT PRIMARY KEY REFERENCES player_profiles(id) ON DELETE CASCADE,
+  mime       TEXT NOT NULL CHECK (mime IN ('image/jpeg','image/png','image/webp')),
+  data       BYTEA NOT NULL,
+  version    TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

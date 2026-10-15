@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { PlayerAvatar } from "@/components/eco/Primitives";
+import { AvatarUpload } from "@/components/eco/AvatarUpload";
 import { CampaignImage } from "./CampaignImage";
 import { XpBar } from "./XpBar";
 import { Stars } from "./MissionCard";
@@ -61,11 +61,12 @@ export function ProfileView({
           {/* avatar with a level ring */}
           <div className="relative">
             <span className="block rounded-full bg-[conic-gradient(from_180deg,var(--color-teal-bright),var(--color-teal-deep),var(--color-teal-bright))] p-[3px]">
-              <PlayerAvatar
+              <AvatarUpload
                 name={profile.fullName}
                 src={profile.avatar}
                 size="xl"
-                className="border-4 border-navy-950"
+                avatarClassName="border-4 border-navy-950"
+                compact
               />
             </span>
             <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full border border-teal/60 bg-navy-950 px-3 py-0.5 font-display text-[11px] font-bold text-teal">

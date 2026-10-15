@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AvatarUpload } from "./AvatarUpload";
 import { motion } from "framer-motion";
 import {
   FormDots,
@@ -49,7 +50,7 @@ export function Dashboard({
         className="flex flex-col gap-5 rounded-[24px] border border-white/10 bg-[linear-gradient(160deg,rgba(0,194,168,0.1),rgba(5,16,28,0.5))] p-6 sm:flex-row sm:items-center sm:justify-between sm:p-7"
       >
         <div className="flex items-center gap-4">
-          <PlayerAvatar name={profile.fullName} src={profile.avatar} size="lg" ring />
+          <AvatarUpload name={profile.fullName} src={profile.avatar} size="lg" ring />
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-teal">
               Player control centre

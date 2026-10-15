@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import { BACKDROPS } from "@/lib/gallery";
 import { MembershipView } from "@/components/eco/MembershipView";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { getMembershipPlans, getRewards } from "@/lib/ecosystem/store";
@@ -24,7 +25,7 @@ export default async function MembershipPage() {
     <>
       <section className="relative isolate overflow-hidden pb-14 pt-36 sm:pb-20 sm:pt-44">
         <Image
-          src="/media/story/why-tables.jpg"
+          src={BACKDROPS.couple}
           alt=""
           fill
           priority

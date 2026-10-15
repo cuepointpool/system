@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { BACKDROPS } from "@/lib/gallery";
 import Link from "next/link";
 import { Reveal } from "@/components/Reveal";
 import { PlayerAvatar } from "./Primitives";
@@ -165,8 +166,8 @@ export async function HomeScene() {
 
             <div className="relative mt-5 aspect-[16/9] overflow-hidden rounded-lg bg-navy-900">
               <Image
-                src="/media/story/scene.jpg"
-                alt="A player lining up a shot"
+                src={BACKDROPS.kingTable}
+                alt="A player lining up a long pot at Cue Point"
                 fill
                 sizes="(max-width:1024px) 100vw, 42vw"
                 className="object-cover"
@@ -317,11 +318,11 @@ export async function HomeOffersCommunity() {
             <div className="grid gap-8 lg:grid-cols-[1.15fr_1fr] lg:items-center lg:gap-14">
               <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-navy-900 lg:aspect-[3/2]">
                 <Image
-                  src="/media/story/players.jpg"
-                  alt="A smiling player lining up a shot"
+                  src={BACKDROPS.doubles}
+                  alt="Friends playing doubles at Cue Point"
                   fill
                   sizes="(max-width:1024px) 100vw, 55vw"
-                  className="object-cover object-[60%_40%]"
+                  className="object-cover object-[60%_45%]"
                 />
               </div>
 

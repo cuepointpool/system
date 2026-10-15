@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { NewTournament } from "@/components/friends/NewTournament";
 import { requirePlayer } from "@/lib/friends/page";
 
@@ -15,6 +16,7 @@ export default async function NewTournamentPage() {
   return (
     <>
       <PageHero
+        image={BACKDROPS.breakOff}
         kicker="Friends · 8-Ball"
         title="Create a tournament"
         intro="Choose the format and size, add your friends, and the bracket builds itself when you start."

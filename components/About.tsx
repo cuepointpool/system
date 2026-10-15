@@ -8,7 +8,7 @@ import { SectionKicker } from "@/components/BrandMark";
 /* ======================================================================== */
 /*  "The Cue Point story" — six photo cards covering what the parlour does:  */
 /*  rankings · the room · tournaments · friend games · friend tournaments ·  */
-/*  booking. /media/venue = real Cue Point photos, /media/story = stock placeholders.  */
+/*  booking. All photos are real Cue Point shots (/media/venue, /media/story).  */
 /* ======================================================================== */
 
 type Card = {
@@ -28,45 +28,45 @@ const CARDS: Card[] = [
     body: "Every ranked frame moves your rating. Hold your spot, chase the player above you and let the board do the talking.",
     cta: "View rankings",
     href: "/rankings",
-    image: "/media/story/ranks.jpg",
-    alt: "A player lining up a shot on the cue ball",
-    focus: "50% 40%",
+    image: "/media/story/story-ranks.jpg",
+    alt: "A player in a blue shirt lining up a shot on a blue-cloth 9ft table",
+    focus: "45% 50%",
   },
   {
     title: "Three 9ft Tables, One Room",
     body: "Full-size tables, tournament cloth and space for a proper stroke on every side. A room built to be played in.",
     cta: "Explore the room",
     href: "/#gallery",
-    image: "/media/venue/wall-art.jpg",
-    alt: "Framed pool photographs on the wall at Cue Point",
-    focus: "60% 40%",
+    image: "/media/story/story-room.jpg",
+    alt: "Two 9ft tables under pendant lamps in the Cue Point room",
+    focus: "50% 70%",
   },
   {
     title: "Tournaments & Events",
     body: "House tournaments on a live bracket. Sign up, follow your draw from your phone and play for the top spot.",
     cta: "View schedule",
     href: "/tournaments",
-    image: "/media/story/tournaments.jpg",
-    alt: "A player stretching over the table for a shot in a busy pool hall",
-    focus: "50% 45%",
+    image: "/media/story/story-tournaments.jpg",
+    alt: "A player lining up a shot in front of the Cue Point neon sign",
+    focus: "55% 45%",
   },
   {
     title: "Game Night With Friends",
     body: "Set up an 8-Ball game, invite your friends and keep score. Both sides confirm the result, and wins count toward the Friends League.",
     cta: "Start a game",
     href: "/play/new-game",
-    image: "/media/story/friends.jpg",
-    alt: "Friends breaking off a rack of pool balls",
-    focus: "50% 35%",
+    image: "/media/story/story-friends.jpg",
+    alt: "A player stretching for a shot while friends look on",
+    focus: "50% 55%",
   },
   {
     title: "Run Your Own Tournament",
     body: "Bring 3 to 32 entries, singles or doubles. We draw the bracket, you run the night and everyone follows it live.",
     cta: "Create a tournament",
     href: "/play/new-tournament",
-    image: "/media/story/host.jpg",
-    alt: "A group of players gathered around the tables",
-    focus: "35% 50%",
+    image: "/media/story/story-host.jpg",
+    alt: "Two players at a 9ft table, one taking a shot as the other waits his turn",
+    focus: "40% 50%",
   },
   {
     title: `One Flat Rate: LKR ${TABLE_HOURLY_RATE} an Hour`,

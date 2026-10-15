@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { PlayersGrid } from "@/components/eco/PlayersGrid";
 import { computeStats, getPlayers, toPlayerLite } from "@/lib/ecosystem/store";
 import type { LeaderboardRow } from "@/lib/ecosystem/types";
@@ -35,6 +36,7 @@ export default async function PlayersPage() {
   return (
     <>
       <PageHero
+        image={BACKDROPS.doubles}
         kicker="Cue Point community"
         wordmark="PLAYERS"
         title={

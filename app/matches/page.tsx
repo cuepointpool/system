@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { MatchHistory } from "@/components/eco/MatchHistory";
 import {
   computeStats,
@@ -39,6 +40,7 @@ export default async function MatchesPage({
   return (
     <>
       <PageHero
+        image={BACKDROPS.longPot}
         kicker="Cue Point matches"
         wordmark="MATCHES"
         title={

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { Dashboard } from "@/components/eco/Dashboard";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { FriendsLeagueCard } from "@/components/friends/FriendsLeagueCard";
@@ -60,6 +61,7 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHero
+        image={BACKDROPS.logoWall}
         kicker={`Cue Point · ${viewer.nickname}`}
         title={
           <>

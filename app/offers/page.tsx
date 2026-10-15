@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { OffersView } from "@/components/eco/OffersView";
 import { getPromotions } from "@/lib/ecosystem/store";
 
@@ -17,6 +18,7 @@ export default async function OffersPage() {
   return (
     <>
       <PageHero
+        image={BACKDROPS.couple}
         kicker="Cue Point offers"
         wordmark="OFFERS"
         title={

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { BACKDROPS } from "@/lib/gallery";
 import Link from "next/link";
 import { SITE, TABLE_HOURLY_RATE } from "@/lib/config";
 import { formatLKR } from "@/lib/utils";
@@ -74,7 +75,7 @@ export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }
     <section id="tables" className="relative isolate overflow-hidden bg-navy-950 py-20 sm:py-28">
       <div className="absolute inset-0 -z-10">
         <Image
-          src="/media/story/book-bg.jpg"
+          src={BACKDROPS.room}
           alt=""
           fill
           sizes="100vw"

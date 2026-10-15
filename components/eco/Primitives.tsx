@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useInView } from "framer-motion";
 import { cn, gradientFromString, initials } from "@/lib/utils";
+import { BACKDROPS } from "@/lib/gallery";
 import type {
   MatchResult,
   MembershipTier,
@@ -48,7 +49,15 @@ export function PlayerAvatar({
       style={src ? undefined : { backgroundImage: `linear-gradient(140deg, ${g1}, ${g2})` }}
     >
       {src ? (
-        <Image src={src} alt={name} fill sizes="112px" className="object-cover" />
+        <Image
+          src={src}
+          alt={name}
+          fill
+          sizes="112px"
+          className="object-cover"
+          // uploaded photos are already small squares — serve them as-is
+          unoptimized={src.startsWith("/api/avatars/")}
+        />
       ) : (
         <>
           <span className="absolute inset-0 bg-[radial-gradient(60%_60%_at_30%_25%,rgba(0,194,168,0.28),transparent_70%)]" />
@@ -423,6 +432,7 @@ export function PageHero({
   actions,
   children,
   wordmark,
+  image = BACKDROPS.room,
 }: {
   kicker: string;
   title: React.ReactNode;
@@ -430,9 +440,18 @@ export function PageHero({
   actions?: React.ReactNode;
   children?: React.ReactNode;
   wordmark?: string;
+  /** backdrop photo (darkened); `null` for a plain header */
+  image?: string | null;
 }) {
   return (
     <section className="relative isolate overflow-hidden pb-10 pt-28 sm:pt-32">
+      {image && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-20">
+          <Image src={image} alt="" fill priority sizes="100vw" className="object-cover object-center" />
+          <div className="absolute inset-0 bg-navy-950/75" />
+          <div className="absolute inset-0 bg-gradient-to-b from-navy-950/30 via-transparent to-navy-950" />
+        </div>
+      )}
       <div className="pointer-events-none absolute -left-24 top-10 -z-10 h-72 w-72 rounded-full bg-teal/15 blur-[110px]" />
       <div className="pointer-events-none absolute right-0 top-0 -z-10 h-80 w-96 rounded-full bg-navy-700/40 blur-[120px]" />
       {wordmark && (

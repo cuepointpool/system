@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { LeaderboardTabs } from "@/components/eco/LeaderboardTabs";
 import { getCampaignLeaderboard } from "@/lib/campaign/progress";
 import { getLeaderboard } from "@/lib/ecosystem/store";
@@ -23,6 +24,7 @@ export default async function RankingsPage() {
   return (
     <>
       <PageHero
+        image={BACKDROPS.kingTable}
         kicker="Cue Point rankings"
         wordmark="RANKINGS"
         title={

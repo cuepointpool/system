@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { NewGame } from "@/components/friends/NewGame";
 import { requirePlayer } from "@/lib/friends/page";
 
@@ -15,6 +16,7 @@ export default async function NewGamePage() {
   return (
     <>
       <PageHero
+        image={BACKDROPS.couple}
         kicker="Friends · 8-Ball"
         title="Create a game"
         intro="Pick the format, add your friends, and start once everyone has accepted."

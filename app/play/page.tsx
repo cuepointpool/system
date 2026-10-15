@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { PlayHub } from "@/components/friends/PlayHub";
 import { requirePlayer } from "@/lib/friends/page";
 import { listMyPlay } from "@/lib/friends/store";
@@ -28,6 +29,7 @@ export default async function PlayPage({
   return (
     <>
       <PageHero
+        image={BACKDROPS.doubles}
         kicker="Friends"
         title={
           <>

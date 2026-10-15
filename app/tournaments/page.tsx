@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHero } from "@/components/eco/Primitives";
+import { BACKDROPS } from "@/lib/gallery";
 import { TournamentCard } from "@/components/eco/TournamentCard";
 import { MagneticButton } from "@/components/MagneticButton";
 import {
@@ -33,6 +34,7 @@ export default async function TournamentsPage() {
   return (
     <>
       <PageHero
+        image={BACKDROPS.breakOff}
         kicker="Cue Point tournaments"
         wordmark="TOURNAMENTS"
         title={

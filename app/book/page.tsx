@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
+import { BACKDROPS } from "@/lib/gallery";
 import { redirect } from "next/navigation";
 import { BookingWidget } from "@/components/BookingWidget";
 import { HOURS_DISPLAY, SITE } from "@/lib/config";
@@ -92,7 +94,13 @@ export default async function BookPage({
   }));
 
   return (
-    <div className="relative min-h-screen overflow-hidden pb-24 pt-28 sm:pb-28 sm:pt-32">
+    <div className="relative isolate min-h-screen overflow-hidden pb-24 pt-28 sm:pb-28 sm:pt-32">
+      {/* the real room behind the booking form, fading out below the fold */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[680px]">
+        <Image src={BACKDROPS.room} alt="" fill priority sizes="100vw" className="object-cover object-center" />
+        <div className="absolute inset-0 bg-navy-950/80" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-navy-950/40 to-navy-950" />
+      </div>
       <div className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[820px] max-w-[140vw] -translate-x-1/2 rounded-full bg-teal/12 blur-[130px]" />
       <h1
         aria-hidden
