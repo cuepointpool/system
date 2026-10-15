@@ -270,22 +270,22 @@ function windowStart(scope: RankingScope): string | null {
 }
 
 export async function computeStats(): Promise<StatsBundle> {
-  // Cache key must move whenever the match log OR the player roster changes —
-  // a freshly registered player has no matches, so a matches-only key would
-  // keep serving a stale bundle that has no stats entry for them.
-  const [{ c, m, pc, pm }] = await query<{
+  // Cache key must move whenever the match log OR any player row changes — a
+  // new player, but also an edited one (photo, name, tier). invalidateStatsCache()
+  // alone can't cover edits: route handlers and pages are separate bundles, each
+  // with its own copy of _cache, so a clear in one never reaches the others.
+  const [{ c, m, ph }] = await query<{
     c: number;
     m: string | null;
-    pc: number;
-    pm: string | null;
+    ph: string | null;
   }>(
     `SELECT
        (SELECT count(*)::int FROM matches) AS c,
        (SELECT COALESCE(max(created_at)::text, '-') FROM matches) AS m,
-       (SELECT count(*)::int FROM player_profiles) AS pc,
-       (SELECT COALESCE(max(created_at)::text, '-') FROM player_profiles) AS pm`,
+       (SELECT md5(string_agg(p::text, ',' ORDER BY p.id))
+          FROM player_profiles p WHERE p.role = 'player') AS ph`,
   );
-  const key = `${c}:${m}:${pc}:${pm}`;
+  const key = `${c}:${m}:${ph ?? "-"}`;
   if (_cache && _cache.key === key) return _cache.bundle;
 
   const [playerRows, matchRows, champRows] = await Promise.all([

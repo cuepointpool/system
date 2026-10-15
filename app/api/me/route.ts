@@ -28,6 +28,7 @@ export async function GET() {
       slug: viewer.slug,
       nickname: viewer.nickname,
       fullName: viewer.fullName,
+      avatar: viewer.avatar,
       email: viewer.email,
       membershipTier: viewer.membershipTier,
       role: viewer.role,

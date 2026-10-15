@@ -91,6 +91,7 @@ export function AvatarUpload({
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || "Could not save the photo.");
       setCurrent(d.avatar);
+      window.dispatchEvent(new Event("cp:avatar"));
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the photo.");
@@ -106,6 +107,7 @@ export function AvatarUpload({
     setBusy(false);
     if (!res.ok) return setError("Could not remove the photo.");
     setCurrent(null);
+    window.dispatchEvent(new Event("cp:avatar"));
     router.refresh();
   }
 

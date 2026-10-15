@@ -16,6 +16,7 @@ type Viewer = {
   slug: string;
   nickname: string;
   fullName: string;
+  avatar: string | null;
   membershipTier: string;
   role: "player" | "staff" | "admin";
   rank: number;
@@ -73,6 +74,11 @@ export function Navbar() {
   useEffect(() => {
     loadViewer();
   }, [loadViewer, pathname]);
+  // a new profile photo doesn't change the route, so AvatarUpload announces it
+  useEffect(() => {
+    window.addEventListener("cp:avatar", loadViewer);
+    return () => window.removeEventListener("cp:avatar", loadViewer);
+  }, [loadViewer]);
 
   const isPartner = !viewer && !!partner;
 
@@ -288,7 +294,7 @@ export function Navbar() {
                   onClick={() => setOpen(false)}
                   className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3"
                 >
-                  <PlayerAvatar name={viewer.fullName} size="sm" />
+                  <PlayerAvatar name={viewer.fullName} src={viewer.avatar} size="sm" />
                   <span>
                     <span className="block text-sm font-semibold text-white">
                       {viewer.nickname}
@@ -649,7 +655,7 @@ function AccountMenu({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] py-1 pl-1 pr-3 transition-colors hover:border-teal/30"
       >
-        <PlayerAvatar name={viewer.fullName} size="xs" />
+        <PlayerAvatar name={viewer.fullName} src={viewer.avatar} size="xs" />
         <span className="text-[13px] font-medium text-white">{viewer.nickname}</span>
         <Chevron open={open} />
       </button>
