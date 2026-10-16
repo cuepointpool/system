@@ -1,10 +1,9 @@
 import Script from "next/script";
 
-/** GA4 loader — renders nothing until NEXT_PUBLIC_GA_ID is set in the
- *  environment (e.g. "G-XXXXXXX"). Kept out of the bundle otherwise. */
+/** GA4 (gtag.js) loader for every page. NEXT_PUBLIC_GA_ID overrides the
+ *  default Cue Point measurement ID. */
 export function Analytics() {
-  const id = process.env.NEXT_PUBLIC_GA_ID;
-  if (!id) return null;
+  const id = process.env.NEXT_PUBLIC_GA_ID || "G-T6MXTNPFXL";
   return (
     <>
       <Script

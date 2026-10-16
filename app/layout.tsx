@@ -51,10 +51,6 @@ export const metadata: Metadata = {
     description: SITE.description,
     images: ["/media/og-logo.png"],
   },
-  icons: {
-    icon: [{ url: "/media/logo-mark.png" }],
-    apple: [{ url: "/media/logo-mark.png" }],
-  },
 };
 
 export const viewport: Viewport = {
