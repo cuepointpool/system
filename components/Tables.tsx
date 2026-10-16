@@ -76,7 +76,7 @@ export function Tables({ tables: initial = [] }: { tables?: FloorTableOption[] }
       <div className="absolute inset-0 -z-10">
         <Image
           src={BACKDROPS.room}
-          alt=""
+          alt="The pool room at Cue Point, Homagama"
           fill
           sizes="100vw"
           className="object-cover object-center"

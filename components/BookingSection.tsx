@@ -11,7 +11,7 @@ export function BookingSection({ tables = [] }: { tables?: TableOption[] }) {
             Reserve
           </SectionKicker>
           <h2 className="mt-3 font-display text-3xl font-bold leading-[1.05] text-white sm:text-4xl md:text-5xl">
-            Pick a day and a time
+            Book a table: pick a day and a time
           </h2>
           <p className="mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-mist">
             See what is free, choose your slot and get a reference to show at

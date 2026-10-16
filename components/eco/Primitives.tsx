@@ -447,7 +447,7 @@ export function PageHero({
     <section className="relative isolate overflow-hidden pb-10 pt-28 sm:pt-32">
       {image && (
         <div aria-hidden className="pointer-events-none absolute inset-0 -z-20">
-          <Image src={image} alt="" fill priority sizes="100vw" className="object-cover object-center" />
+          <Image src={image} alt="Inside Cue Point pool parlour" fill priority sizes="100vw" className="object-cover object-center" />
           <div className="absolute inset-0 bg-navy-950/75" />
           <div className="absolute inset-0 bg-gradient-to-b from-navy-950/30 via-transparent to-navy-950" />
         </div>

@@ -17,7 +17,7 @@ const cta =
 
 export function Hero() {
   const [videoReady, setVideoReady] = useState(false);
-  // The desktop clip is heavy (~11 MB), so phones and tablets get a small
+  // The desktop clip is ~1 MB, so phones and tablets get a small
   // (~0.6 MB) encode of the same footage. Either one loads only after the
   // page is interactive, and neither on data-saver / slow connections — the
   // still photo already carries the section.

@@ -10,7 +10,7 @@ export const SITE = {
     process.env.NEXT_PUBLIC_SITE_URL ||
     "https://d2tisxlomg8f7u.cloudfront.net",
   description:
-    "Cue Point is a pool parlour in Pitipana, Homagama with three full-size 9ft tables, player rankings, tournaments and online table booking.",
+    "Cue Point is a pool parlour in Pitipana, Homagama. Book a table online on three 9ft King Model pool tables, LKR 800 an hour. Player rankings and tournaments, and joining is free.",
   address: {
     line1: "Pitipana",
     line2: "Homagama",

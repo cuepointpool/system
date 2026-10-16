@@ -5,6 +5,7 @@ import { BACKDROPS } from "@/lib/gallery";
 import { redirect } from "next/navigation";
 import { BookingWidget } from "@/components/BookingWidget";
 import { HOURS_DISPLAY, SITE } from "@/lib/config";
+import { EmailLink } from "@/components/EmailLink";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { partnerViewer } from "@/lib/partners";
 import { listTables } from "@/lib/tables";
@@ -97,7 +98,7 @@ export default async function BookPage({
     <div className="relative isolate min-h-screen overflow-hidden pb-24 pt-28 sm:pb-28 sm:pt-32">
       {/* the real room behind the booking form, fading out below the fold */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[680px]">
-        <Image src={BACKDROPS.room} alt="" fill priority sizes="100vw" className="object-cover object-center" />
+        <Image src={BACKDROPS.room} alt="The pool room at Cue Point, Homagama" fill priority sizes="100vw" className="object-cover object-center" />
         <div className="absolute inset-0 bg-navy-950/80" />
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-navy-950/40 to-navy-950" />
       </div>
@@ -165,12 +166,7 @@ export default async function BookPage({
             >
               {SITE.phone}
             </a>
-            <a
-              href={`mailto:${SITE.email}`}
-              className="mt-1 block text-xs text-mist transition-colors hover:text-white"
-            >
-              {SITE.email}
-            </a>
+            <EmailLink className="mt-1 block text-xs text-mist transition-colors hover:text-white" />
           </div>
         </div>
       </div>

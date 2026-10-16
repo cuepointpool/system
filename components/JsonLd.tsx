@@ -4,7 +4,7 @@ import { TABLE_HOURLY_RATE } from "@/lib/config";
 /** Structured data for the homepage — LocalBusiness + Organization + WebSite.
  *  Rendered server-side so crawlers and LLMs see it in the initial HTML. */
 export function HomeJsonLd() {
-  const { url, name, description, phone, email, address } = SITE;
+  const { url, name, description, phone, address } = SITE;
   const img = `${url}/media/og-logo.png`;
 
   const graph = [
@@ -15,7 +15,6 @@ export function HomeJsonLd() {
       description,
       url,
       telephone: phone,
-      email,
       image: img,
       priceRange: `LKR ${TABLE_HOURLY_RATE}/hour`,
       currenciesAccepted: "LKR",
@@ -33,6 +32,7 @@ export function HomeJsonLd() {
         longitude: address.geo.lng,
       },
       hasMap: address.maps,
+      sameAs: [address.maps],
       openingHoursSpecification: [
         {
           "@type": "OpeningHoursSpecification",
@@ -61,7 +61,7 @@ export function HomeJsonLd() {
       name,
       url,
       logo: `${url}/media/logo-mark.png`,
-      email,
+      sameAs: [address.maps],
       contactPoint: {
         "@type": "ContactPoint",
         telephone: phone,

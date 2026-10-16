@@ -8,6 +8,7 @@ import { Tables } from "@/components/Tables";
 import { Gallery } from "@/components/Gallery";
 import { BookingSection } from "@/components/BookingSection";
 import { Location } from "@/components/Location";
+import { Faq } from "@/components/Faq";
 import type { Metadata } from "next";
 import { HomeScene, HomeOffersCommunity } from "@/components/eco/HomeSections";
 import { HomeJsonLd } from "@/components/JsonLd";
@@ -43,6 +44,7 @@ export default async function Home() {
       <Gallery />
       <HomeOffersCommunity />
       <BookingSection tables={tables} />
+      <Faq />
       <Location />
     </>
   );

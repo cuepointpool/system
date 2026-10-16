@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { scrollToId } from "./SmoothScroll";
+import { EmailLink } from "./EmailLink";
 import { HOURS_DISPLAY, NAV_LINKS, SITE } from "@/lib/config";
 
 export function Footer() {
@@ -25,7 +26,7 @@ export function Footer() {
 
           <div className="grid grid-cols-2 gap-10 sm:grid-cols-3">
             <div>
-              <h4 className="text-sm font-semibold text-white">Explore</h4>
+              <h2 className="text-sm font-semibold text-white">Explore</h2>
               <ul className="mt-4 space-y-2.5">
                 {NAV_LINKS.map((l) => (
                   <li key={l.href}>
@@ -40,7 +41,7 @@ export function Footer() {
               </ul>
             </div>
             <div>
-              <h4 className="text-sm font-semibold text-white">Play</h4>
+              <h2 className="text-sm font-semibold text-white">Play</h2>
               <ul className="mt-4 space-y-2.5 text-sm text-mist">
                 <li>
                   <Link href="/book" className="transition-colors hover:text-white">
@@ -65,7 +66,7 @@ export function Footer() {
               </ul>
             </div>
             <div>
-              <h4 className="text-sm font-semibold text-white">Visit</h4>
+              <h2 className="text-sm font-semibold text-white">Visit</h2>
               <address className="mt-4 space-y-2.5 text-sm not-italic text-mist">
                 <p>
                   {SITE.address.line1}, {SITE.address.line2}, {SITE.address.country}
@@ -79,9 +80,7 @@ export function Footer() {
                   </a>
                 </p>
                 <p>
-                  <a href={`mailto:${SITE.email}`} className="transition-colors hover:text-white">
-                    {SITE.email}
-                  </a>
+                  <EmailLink className="transition-colors hover:text-white" />
                 </p>
               </address>
             </div>

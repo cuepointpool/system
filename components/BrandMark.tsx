@@ -9,7 +9,7 @@ import logoMark from "@/public/media/logo-mark.png";
 export function BrandMark({
   size = 28,
   className,
-  alt = "",
+  alt = "Cue Point logo",
 }: {
   size?: number;
   className?: string;

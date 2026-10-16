@@ -26,7 +26,7 @@ export default async function MembershipPage() {
       <section className="relative isolate overflow-hidden pb-14 pt-36 sm:pb-20 sm:pt-44">
         <Image
           src={BACKDROPS.couple}
-          alt=""
+          alt="Two players at a Cue Point pool table"
           fill
           priority
           sizes="100vw"
