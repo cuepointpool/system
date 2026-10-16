@@ -33,33 +33,51 @@ export function TournamentCard({ t, delay = 0 }: { t: OfficialListItem; delay?: 
       className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] transition-all duration-300 hover:-translate-y-1 hover:border-teal/30 hover:shadow-[0_30px_70px_-40px_rgba(0,194,168,0.4)]"
     >
       <Link href={`/tournaments/${t.slug}`} data-cursor="hot" className="block">
-        <div className="relative h-36 overflow-hidden" style={{ background: "linear-gradient(135deg,#0c4a4a,#062231)" }}>
-          <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.4),transparent_40%),radial-gradient(circle_at_80%_60%,rgba(0,194,168,0.4),transparent_45%)]" />
-          <div className="absolute inset-0 grid place-items-center">
-            <span className="grid h-14 w-14 place-items-center rounded-full bg-[#05090f]/80 font-display text-lg text-white ring-1 ring-white/10">
-              {t.status === "completed" ? "🏆" : "8"}
-            </span>
-          </div>
+        <div
+          className={cn("relative overflow-hidden", t.poster ? "aspect-[4/5]" : "h-36")}
+          style={{ background: "linear-gradient(135deg,#0c4a4a,#062231)" }}
+        >
+          {t.poster ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={t.poster}
+              alt={`${t.name} poster`}
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+            />
+          ) : (
+            <>
+              <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.4),transparent_40%),radial-gradient(circle_at_80%_60%,rgba(0,194,168,0.4),transparent_45%)]" />
+              <div className="absolute inset-0 grid place-items-center">
+                <span className="grid h-14 w-14 place-items-center rounded-full bg-[#05090f]/80 font-display text-lg text-white ring-1 ring-white/10">
+                  {t.status === "completed" ? "🏆" : "8"}
+                </span>
+              </div>
+            </>
+          )}
           <span
             className={cn(
-              "absolute left-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ring-1",
+              "absolute left-3 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ring-1 backdrop-blur",
+              t.poster ? "bottom-3" : "top-3",
               meta.cls,
             )}
           >
             {meta.label}
           </span>
-          <span className="absolute bottom-3 right-3 max-w-[70%] truncate rounded-full bg-black/40 px-2.5 py-1 text-[10px] font-medium text-white ring-1 ring-white/10">
-            {t.formatLine}
-          </span>
+          {!t.poster && (
+            <span className="absolute bottom-3 right-3 max-w-[70%] truncate rounded-full bg-black/40 px-2.5 py-1 text-[10px] font-medium text-white ring-1 ring-white/10">
+              {t.formatLine}
+            </span>
+          )}
         </div>
 
         <div className="p-5">
           <h3 className="font-display text-lg font-bold text-white">{t.name}</h3>
           {t.summary && <p className="mt-1 line-clamp-2 text-[13px] text-mist">{t.summary}</p>}
+          {t.poster && <p className="mt-1 text-[12px] text-mist/80">{t.formatLine}</p>}
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-[12px]">
-            <Field k="Starts" v={t.startAt ? formatDayTime(t.startAt) : "Date to be announced"} />
-            <Field k="Prize pool" v={t.prizePool ? formatLKR(t.prizePool) : "—"} accent />
+            <Field k="Starts" v={t.startAt ? formatDayTime(t.startAt) : "Date will be announced"} />
+            {t.prizePool ? <Field k="Prize pool" v={formatLKR(t.prizePool)} accent /> : <Field k="Format" v={t.kind === "league" ? "League" : t.kind === "groups" ? "Groups" : t.kind === "double_elim" ? "Two lives" : "Knockout"} />}
             <Field k="Entry" v={!t.entryFee ? "Free" : formatLKR(t.entryFee)} />
             <Field k={t.champion ? "Champion" : "Players"} v={t.champion ? t.champion.nickname : `${t.registered}/${t.capacity}`} />
           </div>

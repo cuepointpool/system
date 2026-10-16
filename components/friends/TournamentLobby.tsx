@@ -350,15 +350,22 @@ function OfficialFacts({ t }: { t: TournamentView }) {
   const o = t.official!;
   const [rules, setRules] = useState(false);
   const facts: [string, string][] = [
-    ["Starts", o.startAt ? formatDayTime(o.startAt) : "Date to be announced"],
-    ["Prize pool", o.prizePool ? formatLKR(o.prizePool) : "—"],
+    ["Starts", o.startAt ? formatDayTime(o.startAt) : "Date will be announced"],
     ["Entry", o.entryFee ? formatLKR(o.entryFee) : "Free"],
     ["Players", `${t.teams.length} / ${t.capacityTeams}`],
   ];
+  if (o.prizePool) facts.splice(1, 0, ["Prize pool", formatLKR(o.prizePool)]);
   if (o.registrationDeadline && t.status === "registration_open")
     facts.push(["Sign up by", formatDayTime(o.registrationDeadline)]);
   return (
-    <div className="mt-4 border-t border-white/10 pt-4">
+    <div className="mt-4 flex flex-col gap-5 border-t border-white/10 pt-4 sm:flex-row-reverse sm:items-start">
+      {o.poster && (
+        <a href={o.poster} target="_blank" rel="noreferrer" className="block shrink-0 sm:w-56" title="Open the poster">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={o.poster} alt={`${t.name} poster`} className="w-full rounded-xl ring-1 ring-white/15" />
+        </a>
+      )}
+      <div className="min-w-0 flex-1">
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {facts.map(([k, val]) => (
           <div key={k}>
@@ -381,6 +388,7 @@ function OfficialFacts({ t }: { t: TournamentView }) {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -471,7 +479,7 @@ function NextStep({
         <>
           {heading("You're signed up!")}
           <p className="mt-1 text-sm text-mist">
-            {o.startAt ? `It starts ${formatDayTime(o.startAt)}. ` : "We'll let you know when it starts. "}
+            {o.startAt ? `It starts ${formatDayTime(o.startAt)}. ` : "The date will be announced — we'll let you know. "}
             Your matches appear here once Cue Point starts the tournament.
           </p>
           <div className="mt-3 max-w-sm">

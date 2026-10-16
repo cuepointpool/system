@@ -656,3 +656,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS friend_tournaments_slug_uq
   ON friend_tournaments (slug) WHERE slug IS NOT NULL;
 CREATE INDEX IF NOT EXISTS friend_tournaments_official_idx
   ON friend_tournaments (official) WHERE official;
+ALTER TABLE friend_tournaments ADD COLUMN IF NOT EXISTS poster TEXT;

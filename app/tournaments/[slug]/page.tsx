@@ -22,6 +22,12 @@ export async function generateMetadata({
     title: t.name,
     description: t.official.summary ?? `${t.name} — a Cue Point pool tournament in Pitipana, Homagama.`,
     alternates: { canonical: `/tournaments/${t.official.slug}` },
+    ...(t.official.poster
+      ? {
+          openGraph: { title: t.name, images: [{ url: t.official.poster, width: 1080, height: 1350 }] },
+          twitter: { card: "summary_large_image", images: [t.official.poster] },
+        }
+      : {}),
   };
 }
 

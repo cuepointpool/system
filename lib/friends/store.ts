@@ -232,6 +232,7 @@ interface TournamentRow {
   rules: string | null;
   start_at: Date | null;
   registration_deadline: Date | null;
+  poster: string | null;
 }
 
 const settingsOf = (t: Pick<TournamentRow, "kind" | "settings">): TournamentSettings =>
@@ -2724,7 +2725,7 @@ export async function createTournament(
       await c.query(
         `UPDATE friend_tournaments
             SET official = true, slug = $2, summary = $3, entry_fee = $4, prize_pool = $5,
-                rules = $6, start_at = $7, registration_deadline = $8
+                rules = $6, start_at = $7, registration_deadline = $8, poster = $9
           WHERE id = $1`,
         [
           id,
@@ -2735,6 +2736,7 @@ export async function createTournament(
           official.rules,
           official.startAt,
           official.registrationDeadline,
+          official.poster,
         ],
       );
     }
@@ -2761,6 +2763,8 @@ export interface OfficialInput {
   rules?: unknown;
   startAt?: unknown;
   registrationDeadline?: unknown;
+  /** a poster already in /public/media (e.g. "/media/tournaments/x.jpg") */
+  poster?: unknown;
 }
 
 function cleanOfficial(raw: OfficialInput) {
@@ -2796,6 +2800,7 @@ function cleanOfficial(raw: OfficialInput) {
     rules: rules || null,
     startAt: when(raw.startAt, "The start"),
     registrationDeadline: when(raw.registrationDeadline, "The sign-up deadline"),
+    poster: /^\/media\/[\w./-]+\.(jpe?g|png|webp)$/i.test(String(raw.poster ?? "")) ? String(raw.poster) : null,
   };
 }
 
@@ -2830,6 +2835,7 @@ function officialInfo(t: TournamentRow, entries: number): OfficialInfo {
     startAt: isoOrNull(t.start_at),
     registrationDeadline: isoOrNull(t.registration_deadline),
     signupClosed: signupClosed(t, entries),
+    poster: t.poster,
   };
 }
 
@@ -2915,6 +2921,7 @@ export async function listOfficialTournaments(opts: { playerId?: string } = {}):
     startAt: isoOrNull(t.start_at),
     registrationDeadline: isoOrNull(t.registration_deadline),
     signupClosed: signupClosed(t, t.entries),
+    poster: t.poster,
     champion: t.champion_team_id ? (champOf.get(t.champion_team_id) ?? null) : null,
     createdAt: iso(t.created_at),
   }));

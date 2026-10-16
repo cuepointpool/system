@@ -142,6 +142,8 @@ export interface OfficialInfo {
   registrationDeadline: string | null;
   /** sign-up is closed: the deadline passed or every place is taken */
   signupClosed: boolean;
+  /** poster image (a /media path), if there is one */
+  poster: string | null;
 }
 
 export interface BracketRound {
@@ -274,6 +276,7 @@ export interface OfficialListItem {
   startAt: string | null;
   registrationDeadline: string | null;
   signupClosed: boolean;
+  poster: string | null;
   champion: PlayerRef | null;
   createdAt: string;
 }

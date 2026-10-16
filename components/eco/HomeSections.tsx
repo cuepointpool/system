@@ -224,7 +224,7 @@ function FeaturedTournament({ t }: { t: OfficialListItem }) {
         {t.name}
       </h4>
       <p className="mt-2 text-[15px] text-white/85">
-        {t.startAt ? formatDateShort(t.startAt) : "Date to be announced"} · {t.formatLine}
+        {t.startAt ? formatDateShort(t.startAt) : "Date will be announced"} · {t.formatLine}
       </p>
       {t.summary && <p className="mt-2 text-[15px] text-white/85">{t.summary}</p>}
       <p className="mt-2 text-[15px] text-white/85">
