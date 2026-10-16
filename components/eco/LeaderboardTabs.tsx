@@ -13,7 +13,7 @@ type Board = "inhouse" | "ranked" | "game";
 
 const NOTE: Record<Board, string> = {
   inhouse: "Every registered player · moves when registered players play each other (never against a guest)",
-  ranked: "Cue Point–hosted tournaments only · points for how far you get",
+  ranked: "Cue Point–hosted tournaments only · points for every match + where you finish",
   game: "Campaign level & XP from completed missions",
 };
 

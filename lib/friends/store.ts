@@ -45,6 +45,8 @@ import {
   isFormat,
   MIN_TEAMS_TO_START,
   MAX_TOURNAMENT_TEAMS,
+  NO_LIMIT,
+  isNoLimit,
   isValidTournamentSize,
   requiredTournamentPlayers,
   type FormatCode,
@@ -738,6 +740,7 @@ export async function getTournamentView(
     format: t.format,
     playersPerTeam: t.players_per_team,
     capacityTeams: t.capacity_teams,
+    noLimit: isNoLimit(t.capacity_teams),
     requiredPlayers: t.players_per_team * t.capacity_teams,
     seeding: t.seeding,
     status: t.status,
@@ -2685,15 +2688,16 @@ export async function createTournament(
   } else if (actor.role !== "player") throw new FriendsError(403, "Only players can create tournaments.");
   if (!isFormat(input.format)) throw new FriendsError(400, "Choose 1v1 or 2v2.");
   const f = FORMATS[input.format];
-  const capacity = Number(input.capacityTeams);
-  if (!isValidTournamentSize(capacity))
+  // official tournaments take everyone who signs up
+  const capacity = official ? NO_LIMIT : Number(input.capacityTeams);
+  if (!official && !isValidTournamentSize(capacity))
     throw new FriendsError(
       400,
       `Choose between ${MIN_TEAMS_TO_START} and ${MAX_TOURNAMENT_TEAMS} entries.`,
     );
   const seeding = input.seeding === "ranking" ? "ranking" : "random";
   const settings = normalizeSettings(input.settings);
-  const formatProblem = validateSettings(settings, capacity);
+  const formatProblem = validateSettings(settings, capacity, !!official);
   if (formatProblem) throw new FriendsError(400, formatProblem);
   const teams = input.teams ?? [];
   if (teams.length > capacity)
@@ -2915,6 +2919,7 @@ export async function listOfficialTournaments(opts: { playerId?: string } = {}):
     formatLine: formatLine(settingsOf(t)),
     status: t.status,
     capacity: t.capacity_teams,
+    noLimit: isNoLimit(t.capacity_teams),
     registered: t.entries,
     entryFee: t.entry_fee,
     prizePool: t.prize_pool,
@@ -2937,8 +2942,8 @@ export interface OfficialResult {
   completedAt: string;
   /** player id → their finish */
   finishes: Map<string, OfficialFinish>;
-  /** every decided match between two players */
-  games: { a: string; b: string; winner: string }[];
+  /** every decided match between two players; `table` = league / group / tie-breaker */
+  games: { a: string; b: string; winner: string; table: boolean }[];
 }
 
 const FINISH_RANK: OfficialFinish[] = ["champion", "runner_up", "semi_final", "quarter_final", "round_of_16", "played"];
@@ -3008,6 +3013,7 @@ export async function officialResults(): Promise<OfficialResult[]> {
           a: playerOf.get(g.team_a_id!) ?? "",
           b: playerOf.get(g.team_b_id!) ?? "",
           winner: playerOf.get(g.winner_team_id!) ?? "",
+          table: g.stage === "league" || g.stage === "group" || g.stage === "decider",
         }))
         .filter((g) => g.a && g.b && g.winner),
     });
@@ -3311,7 +3317,7 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
         `At least ${MIN_TEAMS_TO_START} complete ${noun} are needed to start (you have ${complete.length}).`,
       );
     const s = settingsOf(t);
-    const problem = validateSettings(s, complete.length);
+    const problem = validateSettings(s, complete.length, isNoLimit(t.capacity_teams));
     if (problem)
       throw new FriendsError(
         400,
@@ -3319,7 +3325,9 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
       );
     const preview = planMain(s, complete.map((x) => x.id));
     const byes = preview.filter((g) => g.isBye).length;
-    if ((incomplete.length > 0 || complete.length < t.capacity_teams) && !force) {
+    // no player limit: whoever signed up is the line-up — nothing to confirm
+    const short = !isNoLimit(t.capacity_teams) && complete.length < t.capacity_teams;
+    if ((incomplete.length > 0 || short) && !force) {
       throw new FriendsError(409, "Please confirm starting with the current line-up.", {
         code: "confirm",
         complete: complete.length,
@@ -3409,7 +3417,7 @@ export async function updateTournamentFormat(tournamentId: string, actor: Actor,
     assertOrganizer(t, actor);
     assertOpen(t);
     const s = normalizeSettings(raw);
-    const problem = validateSettings(s, t.capacity_teams);
+    const problem = validateSettings(s, t.capacity_teams, isNoLimit(t.capacity_teams));
     if (problem) throw new FriendsError(400, problem);
     await c.query(`UPDATE friend_tournaments SET kind = $2, settings = $3 WHERE id = $1`, [
       tournamentId,

@@ -191,6 +191,8 @@ export interface TournamentView {
   format: FormatCode;
   playersPerTeam: number;
   capacityTeams: number;
+  /** no player limit (official tournaments): capacityTeams is just a marker */
+  noLimit: boolean;
   requiredPlayers: number;
   seeding: "random" | "ranking";
   status: TournamentStatus;
@@ -270,6 +272,8 @@ export interface OfficialListItem {
   formatLine: string;
   status: TournamentStatus;
   capacity: number;
+  /** no player limit — show only how many signed up */
+  noLimit: boolean;
   registered: number;
   entryFee: number | null;
   prizePool: number | null;

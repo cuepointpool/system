@@ -657,3 +657,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS friend_tournaments_slug_uq
 CREATE INDEX IF NOT EXISTS friend_tournaments_official_idx
   ON friend_tournaments (official) WHERE official;
 ALTER TABLE friend_tournaments ADD COLUMN IF NOT EXISTS poster TEXT;
+ALTER TABLE friend_tournaments DROP CONSTRAINT IF EXISTS friend_tournaments_capacity_teams_check;
+ALTER TABLE friend_tournaments ADD CONSTRAINT friend_tournaments_capacity_teams_check
+  CHECK (capacity_teams BETWEEN 2 AND 1024);

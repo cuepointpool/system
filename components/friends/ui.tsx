@@ -193,7 +193,7 @@ export function PrimaryButton({
     <button
       {...rest}
       className={cn(
-        "rounded-full px-5 py-2.5 text-sm font-semibold text-navy-950 transition-opacity disabled:cursor-not-allowed disabled:opacity-40",
+        "rounded-full px-5 py-2.5 text-sm font-bold text-white shadow-[0_8px_24px_-10px_rgba(236,72,153,0.7)] [text-shadow:0_1px_2px_rgba(0,0,0,0.35)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40",
         ACCENT_GRADIENT,
         className,
       )}

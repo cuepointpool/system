@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cn, formatDayTime, formatLKR } from "@/lib/utils";
+import { cn, entryFeeText, formatDayTime, formatLKR } from "@/lib/utils";
 import { MIN_TEAMS_TO_START } from "@/lib/friends/formats";
 import { bestOfLabel, describe, framesToWin, winningScores, type TournamentSettings } from "@/lib/friends/structure";
 import type { GameView, PendingTie, TeamView, TournamentSection, TournamentView } from "@/lib/friends/types";
@@ -351,8 +351,8 @@ function OfficialFacts({ t }: { t: TournamentView }) {
   const [rules, setRules] = useState(false);
   const facts: [string, string][] = [
     ["Starts", o.startAt ? formatDayTime(o.startAt) : "Date will be announced"],
-    ["Entry", o.entryFee ? formatLKR(o.entryFee) : "Free"],
-    ["Players", `${t.teams.length} / ${t.capacityTeams}`],
+    ["Entry fee", entryFeeText(o.entryFee)],
+    ["Players", t.noLimit ? `${t.teams.length} signed up` : `${t.teams.length} / ${t.capacityTeams}`],
   ];
   if (o.prizePool) facts.splice(1, 0, ["Prize pool", formatLKR(o.prizePool)]);
   if (o.registrationDeadline && t.status === "registration_open")
@@ -482,9 +482,7 @@ function NextStep({
             {o.startAt ? `It starts ${formatDayTime(o.startAt)}. ` : "The date will be announced — we'll let you know. "}
             Your matches appear here once Cue Point starts the tournament.
           </p>
-          <div className="mt-3 max-w-sm">
-            <CountBar label="Players" have={t.teams.length} need={t.capacityTeams} />
-          </div>
+          <p className="mt-3 text-sm text-white">{t.teams.length} signed up so far.</p>
         </>,
         "ok",
       );
@@ -495,7 +493,7 @@ function NextStep({
           <p className="mt-1 text-sm text-mist">
             {o.signupClosed
               ? "Every place is taken or the deadline has passed."
-              : `${left} place${left === 1 ? "" : "s"} left. Sign in to your Cue Point account to sign up — joining is free.`}
+              : `${t.noLimit ? "Everyone can play" : `${left} place${left === 1 ? "" : "s"} left`}. Sign in to your Cue Point account to sign up.`}
           </p>
           {!o.signupClosed && (
             <Link
@@ -512,8 +510,13 @@ function NextStep({
         <>
           {heading("Want to play?")}
           <p className="mt-1 text-sm text-mist">
-            {left} place{left === 1 ? "" : "s"} left
-            {o.entryFee ? ` · entry ${formatLKR(o.entryFee)}, paid at the counter` : " · free entry"}.
+            {t.noLimit ? `${t.teams.length} signed up so far` : `${left} place${left === 1 ? "" : "s"} left`}
+            {o.entryFee == null
+              ? " · entry fee will be announced"
+              : o.entryFee === 0
+                ? " · free entry"
+                : ` · entry ${formatLKR(o.entryFee)}, paid at the counter`}
+            .
           </p>
           <PrimaryButton className="mt-4 px-10 py-3.5 text-base" disabled={busy} onClick={() => onAct("register")}>
             Sign me up
@@ -524,7 +527,7 @@ function NextStep({
       <>
         {heading(o.signupClosed ? "Sign-up is closed" : "Sign-up is open")}
         <p className="mt-1 text-sm text-mist">
-          {t.teams.length} of {t.capacityTeams} players signed up.
+          {t.noLimit ? `${t.teams.length} players signed up.` : `${t.teams.length} of ${t.capacityTeams} players signed up.`}
         </p>
       </>,
       "plain",
@@ -553,14 +556,22 @@ function NextStep({
         <>
           {heading(enough ? "Ready when you are" : t.official ? "Waiting for sign-ups" : `Add ${noun}`)}
           <p className="mt-1 text-sm text-mist">
-            {t.teamsComplete} of {t.capacityTeams} {noun} {t.official ? "signed up" : "ready"}.{" "}
+            {t.noLimit ? `${t.teamsComplete} ${noun}` : `${t.teamsComplete} of ${t.capacityTeams} ${noun}`}{" "}
+            {t.official ? "signed up" : "ready"}.{" "}
             {enough
               ? "Press Start and the matches are made for you. Late arrivals? Wait, or start without them."
               : `You need at least ${MIN_TEAMS_TO_START} to start — add them in the ${t.playersPerTeam === 1 ? "Players" : "Teams"} tab.`}
           </p>
-          <div className="mt-3 max-w-sm">
-            <CountBar label={t.playersPerTeam === 1 ? "Players" : "Teams"} have={t.teamsComplete} need={t.capacityTeams} />
-          </div>
+          {!t.noLimit && (
+            <div className="mt-3 max-w-sm">
+              <CountBar label={t.playersPerTeam === 1 ? "Players" : "Teams"} have={t.teamsComplete} need={t.capacityTeams} />
+            </div>
+          )}
+          {t.noLimit && (
+            <p className="mt-2 text-sm text-mist">
+              Sign-up stays open until you press Start. Everyone signed up by then plays.
+            </p>
+          )}
           <PrimaryButton className="mt-4 px-10 py-3.5 text-base" disabled={busy || !enough} onClick={() => onAct("start")}>
             ▶ Start tournament
           </PrimaryButton>
@@ -571,7 +582,8 @@ function NextStep({
       <>
         {heading("You're in!")}
         <p className="mt-1 text-sm text-mist">
-          Waiting for {t.official ? "Cue Point" : t.organizer.nickname} to start. {t.teamsComplete} of {t.capacityTeams} {noun} ready.
+          Waiting for {t.official ? "Cue Point" : t.organizer.nickname} to start.{" "}
+          {t.noLimit ? `${t.teamsComplete} ${noun} signed up.` : `${t.teamsComplete} of ${t.capacityTeams} ${noun} ready.`}
         </p>
       </>,
       "plain",
@@ -859,7 +871,7 @@ function PlayersTab({
 }) {
   const v = t.viewer;
   const ppt = t.playersPerTeam;
-  const canAdd = v.canManage && t.teams.length < t.capacityTeams;
+  const canAdd = v.canManage && (t.noLimit || t.teams.length < t.capacityTeams);
   return (
     <div className="space-y-5">
       {canAdd && (
@@ -888,7 +900,7 @@ function PlayersTab({
       )}
 
       <p className="text-sm text-mist">
-        {t.teams.length} of {t.capacityTeams} places filled.
+        {t.noLimit ? `${t.teams.length} signed up.` : `${t.teams.length} of ${t.capacityTeams} places filled.`}
       </p>
       {t.teams.length === 0 && <p className="text-sm text-mist">Nobody added yet.</p>}
       <div className="grid gap-3 sm:grid-cols-2">
@@ -967,14 +979,18 @@ function FormatCard({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<TournamentSettings>(t.settings);
   const noun = t.playersPerTeam === 1 ? "player" : "team";
-  const summary = describe(t.settings, t.capacityTeams);
+  // no player limit: work it out for who has signed up so far
+  const planN = t.noLimit ? Math.max(t.teams.length, MIN_TEAMS_TO_START) : t.capacityTeams;
+  const summary = describe(t.settings, planN);
   return (
     <Card>
       {!editing ? (
         <>
           <p className="text-base font-semibold text-white">{formatLine(t.settings)}</p>
           <p className="mt-1 text-sm text-mist">
-            {summary.totalMatches} matches · {summary.perEntry}. Play at your own pace.
+            {t.noLimit && `With ${planN} players: `}
+            {summary.totalMatches} matches · {summary.perEntry}. Play at your own pace
+            {t.noLimit ? " — split over as many days as you need." : "."}
           </p>
           <ol className="mt-3 space-y-1 text-sm text-mist">
             {summary.stages.map((st, i) => (
@@ -997,7 +1013,7 @@ function FormatCard({
         </>
       ) : (
         <>
-          <FormatPicker value={draft} onChange={setDraft} entries={t.capacityTeams} noun={noun} />
+          <FormatPicker value={draft} onChange={setDraft} entries={planN} noun={noun} noLimit={t.noLimit} />
           <div className="mt-5 flex gap-2">
             <PrimaryButton
               className="px-6 py-3"

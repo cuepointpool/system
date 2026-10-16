@@ -128,12 +128,17 @@ export function normalizeSettings(raw: unknown): TournamentSettings {
 }
 
 /** null when `n` entrants can play this format, otherwise the reason */
-export function validateSettings(s: TournamentSettings, n: number): string | null {
+/**
+ * Is this format playable with `n` entries? `noLimit` (official tournaments):
+ * Cue Point runs them over as many days as it takes, so the size and
+ * match-count caps for friends' events don't apply.
+ */
+export function validateSettings(s: TournamentSettings, n: number, noLimit = false): string | null {
   if (n < LIMITS.minEntries) return `At least ${LIMITS.minEntries} entries are needed.`;
-  if (n > LIMITS.maxEntries) return `At most ${LIMITS.maxEntries} entries.`;
+  if (!noLimit && n > LIMITS.maxEntries) return `At most ${LIMITS.maxEntries} entries.`;
   if (s.kind === "league") {
     const max = s.legs === 2 ? LIMITS.maxDoubleLegLeagueEntries : LIMITS.maxLeagueEntries;
-    if (n > max)
+    if (!noLimit && n > max)
       return `A league ${s.legs === 2 ? "played twice " : ""}takes at most ${max} entries — try Groups for more.`;
     if (s.finish === "top4" && n < 5) return "Semi finals need at least 5 entries in the league.";
     if (s.finish === "top8" && n < 9) return "Quarter finals need at least 9 entries in the league.";
@@ -147,6 +152,7 @@ export function validateSettings(s: TournamentSettings, n: number): string | nul
     if (s.groups * s.advance < 4)
       return `At least 4 need to go through (for a final and a 3rd-place match) — let ${Math.ceil(4 / s.groups)} go through from each group.`;
   }
+  if (noLimit) return null;
   const total = describe(s, n).totalMatches;
   if (total > LIMITS.maxMatches)
     return `That would be ${total} matches — too many. Use fewer entries, play once, or use groups.`;

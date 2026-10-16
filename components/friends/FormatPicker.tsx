@@ -49,6 +49,7 @@ export function FormatPicker({
   onChange,
   entries,
   noun,
+  noLimit = false,
 }: {
   value: TournamentSettings;
   onChange: (s: TournamentSettings) => void;
@@ -56,13 +57,15 @@ export function FormatPicker({
   entries: number;
   /** "player" | "team" */
   noun: string;
+  /** official tournament: no cap on players or matches */
+  noLimit?: boolean;
 }) {
   const s = value;
   const [more, setMore] = useState(false);
   const set = (patch: Partial<TournamentSettings>) => onChange({ ...s, ...patch });
   const maxGroups = Math.max(2, Math.min(LIMITS.maxGroups, Math.floor(entries / LIMITS.minGroupSize)));
   const smallestGroup = Math.floor(entries / Math.max(2, s.groups));
-  const problem = validateSettings(s, entries);
+  const problem = validateSettings(s, entries, noLimit);
   const summary = describe(s, entries);
   const table = s.kind === "league" || s.kind === "groups";
   // groups always play a 3rd-place match, so there's nothing to choose

@@ -6,7 +6,7 @@ import { PlayerAvatar } from "./Primitives";
 import { getLeaderboard, getPromotions } from "@/lib/ecosystem/store";
 import { listOfficialTournaments } from "@/lib/friends/store";
 import type { OfficialListItem } from "@/lib/friends/types";
-import { formatDateShort, formatLKR } from "@/lib/utils";
+import { entryFeeText, formatDateShort, formatLKR } from "@/lib/utils";
 import { SectionKicker } from "@/components/BrandMark";
 
 const MEDAL: Record<number, string> = {
@@ -229,7 +229,7 @@ function FeaturedTournament({ t }: { t: OfficialListItem }) {
       {t.summary && <p className="mt-2 text-[15px] text-white/85">{t.summary}</p>}
       <p className="mt-2 text-[15px] text-white/85">
         {t.prizePool ? `Prize pool ${formatLKR(t.prizePool)} · ` : ""}
-        {t.entryFee ? `Entry ${formatLKR(t.entryFee)}` : "Free entry"}
+        {`Entry fee: ${entryFeeText(t.entryFee)}`}
         {t.champion ? ` · Won by ${t.champion.nickname}` : ""}
       </p>
 
@@ -240,8 +240,10 @@ function FeaturedTournament({ t }: { t: OfficialListItem }) {
         >
           {t.status === "registration_open" && !t.signupClosed ? "Sign up" : "View tournament"}
         </Link>
-        {t.status === "registration_open" && !t.signupClosed && spots > 0 && (
-          <span className="text-sm text-mist">{spots} places left</span>
+        {t.status === "registration_open" && !t.signupClosed && (t.noLimit || spots > 0) && (
+          <span className="text-sm text-mist">
+            {t.noLimit ? `${t.registered} signed up` : `${spots} places left`}
+          </span>
         )}
       </div>
     </div>

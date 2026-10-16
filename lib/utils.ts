@@ -2,6 +2,12 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
+/** a tournament entry fee: null = not decided yet, 0 = free */
+export function entryFeeText(fee: number | null): string {
+  if (fee == null) return "Will be announced";
+  return fee === 0 ? "Free" : formatLKR(fee);
+}
+
 export function formatLKR(amount: number): string {
   return "LKR " + amount.toLocaleString("en-LK");
 }

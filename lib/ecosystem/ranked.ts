@@ -1,16 +1,27 @@
 /* ============================================================
    Ranked leaderboard — built ONLY from tournaments Cue Point hosts
    (official tournaments, run on the same engine as friend
-   tournaments). It is empty until the first one finishes; every
-   finished tournament then awards ranking points by how far each
-   player got.
+   tournaments). It is empty until the first one finishes. Every
+   MATCH earns points, plus a bonus for where you finished — so the
+   player who wins one tournament isn't automatically top of the
+   rankings; steady winners climb over time.
+
+   A league / group match is worth less than a knockout match: a
+   league has many more matches per player, and this keeps one big
+   league from counting far more than a knockout.
 
    Pure: callers pass in each finished tournament's finishes and
    matches (friends/store officialResults). The in-house leaderboard (every registered player, every
    recorded match) lives in store.getLeaderboard and is untouched.
    ============================================================ */
 
-/** points for where you finished in one hosted tournament */
+/** points for every match: knockout / play-off / final, and league / group / tie-breaker */
+export const MATCH_POINTS = {
+  knockout: { win: 10, played: 2 },
+  table: { win: 4, played: 1 },
+} as const;
+
+/** bonus for where you finished in one hosted tournament */
 export const RANKED_POINTS = {
   champion: 100,
   runnerUp: 70,
@@ -50,13 +61,18 @@ export interface FinishedTournament {
   completedAt: string;
   /** player id → finish */
   finishes: Map<string, Finish>;
-  games: { a: string; b: string; winner: string }[];
+  /** every decided match; `table` = league / group / tie-breaker */
+  games: { a: string; b: string; winner: string; table: boolean }[];
 }
 
 export interface TournamentResult {
   tournamentId: string;
   tournamentName: string;
   finish: Finish;
+  /** from matches */
+  matchPoints: number;
+  /** finishing bonus */
+  finishPoints: number;
   points: number;
 }
 
@@ -85,18 +101,27 @@ export function computeRanked(tournaments: FinishedTournament[]): RankedEntry[] 
   const done = [...tournaments].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
 
   for (const t of done) {
+    // match points in this tournament
+    const fromMatches = new Map<string, number>();
+    const add = (id: string, n: number) => fromMatches.set(id, (fromMatches.get(id) ?? 0) + n);
+    for (const g of t.games) {
+      const p = g.table ? MATCH_POINTS.table : MATCH_POINTS.knockout;
+      const loser = g.winner === g.a ? g.b : g.a;
+      add(g.winner, p.win + p.played);
+      add(loser, p.played);
+      entry(g.winner).wins += 1;
+      entry(loser).losses += 1;
+    }
     for (const [pid, finish] of t.finishes) {
       const e = entry(pid);
-      const pts = FINISH_POINTS[finish];
+      const finishPoints = FINISH_POINTS[finish];
+      const matchPoints = fromMatches.get(pid) ?? 0;
+      const pts = matchPoints + finishPoints;
       e.points += pts;
       e.tournaments += 1;
       if (finish === "champion") e.titles += 1;
       if (FINISH_ORDER.indexOf(finish) < FINISH_ORDER.indexOf(e.bestFinish)) e.bestFinish = finish;
-      e.results.push({ tournamentId: t.id, tournamentName: t.name, finish, points: pts });
-    }
-    for (const g of t.games) {
-      entry(g.winner).wins += 1;
-      entry(g.winner === g.a ? g.b : g.a).losses += 1;
+      e.results.push({ tournamentId: t.id, tournamentName: t.name, finish, matchPoints, finishPoints, points: pts });
     }
   }
   return [...byPlayer.values()].sort(

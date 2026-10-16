@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Countdown } from "./Primitives";
-import { cn, formatLKR, formatDayTime } from "@/lib/utils";
+import { cn, entryFeeText, formatLKR, formatDayTime } from "@/lib/utils";
 import type { OfficialListItem } from "@/lib/friends/types";
 
 /** the badge on a card / the tournament page */
@@ -78,11 +78,14 @@ export function TournamentCard({ t, delay = 0 }: { t: OfficialListItem; delay?: 
           <div className="mt-4 grid grid-cols-2 gap-3 text-[12px]">
             <Field k="Starts" v={t.startAt ? formatDayTime(t.startAt) : "Date will be announced"} />
             {t.prizePool ? <Field k="Prize pool" v={formatLKR(t.prizePool)} accent /> : <Field k="Format" v={t.kind === "league" ? "League" : t.kind === "groups" ? "Groups" : t.kind === "double_elim" ? "Two lives" : "Knockout"} />}
-            <Field k="Entry" v={!t.entryFee ? "Free" : formatLKR(t.entryFee)} />
-            <Field k={t.champion ? "Champion" : "Players"} v={t.champion ? t.champion.nickname : `${t.registered}/${t.capacity}`} />
+            <Field k="Entry" v={entryFeeText(t.entryFee)} />
+            <Field
+              k={t.champion ? "Champion" : "Players"}
+              v={t.champion ? t.champion.nickname : t.noLimit ? `${t.registered} signed up` : `${t.registered}/${t.capacity}`}
+            />
           </div>
 
-          {t.status === "registration_open" && (
+          {t.status === "registration_open" && !t.noLimit && (
             <div className="mt-4">
               <div className="mb-1 flex items-center justify-between text-[11px] text-mist">
                 <span>

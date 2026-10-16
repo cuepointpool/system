@@ -57,10 +57,13 @@ export function NewTournament({ me, official = false }: { me: PickedPlayer | nul
   const f = FORMATS[format];
   const ppt = f.playersPerTeam;
   const noun = f.sideNoun; // "player" | "team"
-  const size = Math.min(MAX_TOURNAMENT_TEAMS, Math.max(MIN_TEAMS_TO_START, places ?? teams.length));
+  // official: no limit — the format preview assumes 16 until people sign up
+  const size = official
+    ? Math.max(16, teams.length)
+    : Math.min(MAX_TOURNAMENT_TEAMS, Math.max(MIN_TEAMS_TO_START, places ?? teams.length));
   // until they pick a style themselves, suggest the one that suits the numbers
   const chosen: TournamentSettings = styleChosen ? settings : { ...settings, kind: recommendedKind(size) };
-  const formatProblem = validateSettings(chosen, size);
+  const formatProblem = validateSettings(chosen, size, official);
   const taken = (id: string) => teams.some((t) => t.some((p) => p.id === id)) || draft.some((p) => p.id === id);
 
   function pick(p: PickedPlayer) {
@@ -250,6 +253,11 @@ export function NewTournament({ me, official = false }: { me: PickedPlayer | nul
               </ul>
             )}
 
+            {official ? (
+              <p className="mt-5 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white">
+                No player limit — everyone who signs up before you press Start plays.
+              </p>
+            ) : (
             <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.02] p-4">
               <p className="text-sm text-white">
                 Places in the tournament: <strong>{size}</strong>
@@ -285,6 +293,7 @@ export function NewTournament({ me, official = false }: { me: PickedPlayer | nul
                 )}
               </div>
             </div>
+            )}
           </>
         )}
 
@@ -300,6 +309,7 @@ export function NewTournament({ me, official = false }: { me: PickedPlayer | nul
               }}
               entries={size}
               noun={noun}
+              noLimit={official}
             />
             <div className="mt-5">
               <p className="mb-2 text-sm font-semibold text-white">Who plays who first?</p>
@@ -337,15 +347,34 @@ export function NewTournament({ me, official = false }: { me: PickedPlayer | nul
                 v={name.trim() || `${me?.nickname ?? "Cue Point"}'s ${format === "1v1" ? "singles" : "doubles"} tournament`}
               />
               <Row k="Game" v={format === "1v1" ? "Singles (1 v 1)" : "Doubles (2 v 2)"} />
-              <Row k={ppt === 1 ? "Players" : "Teams"} v={`${teams.length} added · ${size} places`} />
+              <Row
+                k={ppt === 1 ? "Players" : "Teams"}
+                v={official ? `${teams.length} added now · no limit` : `${teams.length} added · ${size} places`}
+              />
               {official && (
                 <>
-                  <Row k="Entry" v={event.entryFee ? `LKR ${Number(event.entryFee).toLocaleString("en-LK")}` : "Free"} />
+                  <Row
+                    k="Entry fee"
+                    v={
+                      event.entryFee.trim() === ""
+                        ? "Will be announced"
+                        : Number(event.entryFee) === 0
+                          ? "Free"
+                          : `LKR ${Number(event.entryFee).toLocaleString("en-LK")}`
+                    }
+                  />
                   <Row k="Prize pool" v={event.prizePool ? `LKR ${Number(event.prizePool).toLocaleString("en-LK")}` : "—"} />
                 </>
               )}
               <Row k="How to play" v={formatLine(chosen)} />
-              <Row k="Matches" v={`${describe(chosen, size).totalMatches} — at your own pace`} />
+              <Row
+                k="Matches"
+                v={
+                  official
+                    ? `${describe(chosen, size).totalMatches} with 16 players — more as more sign up`
+                    : `${describe(chosen, size).totalMatches} — at your own pace`
+                }
+              />
             </dl>
             <p className="mt-4 text-sm text-mist">
               {official ? (
@@ -443,7 +472,7 @@ function EventStep({
       </label>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="block">
-          <span className="text-sm font-semibold text-white">Entry fee, LKR (empty = free)</span>
+          <span className="text-sm font-semibold text-white">Entry fee, LKR (0 = free, empty = announce later)</span>
           <input value={event.entryFee} onChange={set("entryFee")} inputMode="numeric" placeholder="1000" className={field} />
         </label>
         <label className="block">

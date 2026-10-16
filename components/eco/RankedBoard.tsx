@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { PlayerAvatar } from "./Primitives";
 import { cn } from "@/lib/utils";
-import { FINISH_LABEL, RANKED_POINTS } from "@/lib/ecosystem/ranked";
+import { FINISH_LABEL, MATCH_POINTS, RANKED_POINTS } from "@/lib/ecosystem/ranked";
 import type { RankedLeaderboardRow } from "@/lib/ecosystem/store";
 
 /* The Ranked leaderboard — points only from tournaments Cue Point hosts. */
@@ -26,8 +26,8 @@ export function RankedBoard({ rows, tournaments }: { rows: RankedLeaderboardRow[
         <p className="text-3xl" aria-hidden>🏆</p>
         <p className="mt-3 font-display text-xl font-bold text-white">The Ranked leaderboard starts with our first tournament</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-mist">
-          Only tournaments hosted by Cue Point count here. When the first one is played, every player who
-          took part gets ranking points for how far they went.
+          Only tournaments hosted by Cue Point count here. Every match you play earns points, plus a bonus
+          for where you finish.
         </p>
         <Link href="/tournaments" className="btn-ghost mt-5 inline-block px-5 py-2.5 text-sm">
           See upcoming tournaments
@@ -40,7 +40,7 @@ export function RankedBoard({ rows, tournaments }: { rows: RankedLeaderboardRow[
   return (
     <div>
       <p className="mt-6 text-xs text-mist">
-        From {tournaments} Cue Point tournament{tournaments === 1 ? "" : "s"} · points for how far you get in each
+        From {tournaments} Cue Point tournament{tournaments === 1 ? "" : "s"} · points for every match, plus a bonus for where you finish
       </p>
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-end">
         {[1, 0, 2].map((idx, slot) => {
@@ -143,7 +143,10 @@ function RankedRow({ row, rank }: { row: RankedLeaderboardRow; rank: number }) {
                 <span className="truncate">
                   <span className="text-white">{r.tournamentName}</span> · {FINISH_LABEL[r.finish]}
                 </span>
-                <span className="shrink-0 tabular-nums text-white">+{r.points}</span>
+                <span className="shrink-0 tabular-nums text-mist">
+                  {r.matchPoints} matches + {r.finishPoints} finish ={" "}
+                  <span className="text-white">+{r.points}</span>
+                </span>
               </li>
             ))}
           </ul>
@@ -159,7 +162,22 @@ function RankedRow({ row, rank }: { row: RankedLeaderboardRow; rank: number }) {
 function PointGuide() {
   return (
     <div className="mx-auto mt-8 max-w-xl rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-      <p className="text-[11px] uppercase tracking-[0.22em] text-mist">Points per Cue Point tournament</p>
+      <p className="text-[11px] uppercase tracking-[0.22em] text-mist">Every match</p>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-center text-sm">
+        <div className="rounded-lg bg-white/[0.04] px-2 py-2">
+          <div className="font-display text-base font-bold text-white">
+            {MATCH_POINTS.knockout.win + MATCH_POINTS.knockout.played} / {MATCH_POINTS.knockout.played}
+          </div>
+          <div className="text-[10px] text-mist">Knockout, play-off or final · win / lose</div>
+        </div>
+        <div className="rounded-lg bg-white/[0.04] px-2 py-2">
+          <div className="font-display text-base font-bold text-white">
+            {MATCH_POINTS.table.win + MATCH_POINTS.table.played} / {MATCH_POINTS.table.played}
+          </div>
+          <div className="text-[10px] text-mist">League or group match · win / lose</div>
+        </div>
+      </div>
+      <p className="mt-4 text-[11px] uppercase tracking-[0.22em] text-mist">Bonus for where you finish</p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center sm:grid-cols-6">
         {POINT_GUIDE.map(([label, pts]) => (
           <div key={label} className="rounded-lg bg-white/[0.04] px-2 py-2">

@@ -44,6 +44,10 @@ export const MIN_TEAMS_TO_START = 3;
 /** largest custom tournament (entries); presets above are just shortcuts */
 export const MAX_TOURNAMENT_TEAMS = 32;
 
+/** official tournaments take everyone who signs up — stored as this "no limit" capacity */
+export const NO_LIMIT = 1024;
+export const isNoLimit = (capacity: number) => capacity >= NO_LIMIT;
+
 /** any whole number of entries from MIN_TEAMS_TO_START to the max — the
  *  bracket generator gives BYEs to whatever isn't a power of two */
 export function isValidTournamentSize(n: number): boolean {
