@@ -5,14 +5,13 @@ import { BACKDROPS } from "@/lib/gallery";
 import { Dashboard } from "@/components/eco/Dashboard";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { FriendsLeagueCard } from "@/components/friends/FriendsLeagueCard";
-import { getFriendPoints } from "@/lib/friends/store";
+import { getFriendPoints, listOfficialTournaments } from "@/lib/friends/store";
 import { PlayTimeCard } from "@/components/eco/PlayTimeCard";
 import { playTimeFor } from "@/lib/play-logs";
 import {
   getLoyaltyForPlayer,
   getMembershipPlans,
   getPlayerProfileView,
-  getTournaments,
 } from "@/lib/ecosystem/store";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +31,7 @@ export default async function DashboardPage() {
     getPlayerProfileView(viewer.slug),
     getLoyaltyForPlayer(viewer.id),
     getMembershipPlans(),
-    getTournaments(),
+    listOfficialTournaments({ playerId: viewer.id }),
     getFriendPoints(viewer.id),
     playTimeFor(viewer.id),
   ]);
@@ -55,7 +54,7 @@ export default async function DashboardPage() {
   );
 
   const registeredTournaments = tournaments
-    .filter((t) => t.registrations.some((r) => r.playerId === viewer.id))
+    .filter((t) => t.status === "registration_open" || t.status === "in_progress")
     .map((t) => ({ name: t.name, slug: t.slug, startAt: t.startAt }));
 
   return (

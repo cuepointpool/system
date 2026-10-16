@@ -8,10 +8,7 @@
    ============================================================ */
 
 import { query, queryOne, transaction } from "../pg";
-import { computeRanked, type RankedEntry } from "./ranked";
-import { hostedRoundLabel, normalizeHostedBestOf } from "./hosted";
-import { cancelCodeOk, newCancelCode } from "../cancel-code";
-import { bestOfLabel, checkScore } from "../friends/structure";
+import { computeRanked, FINISH_LABEL, type RankedEntry } from "./ranked";
 import {
   assignRanks,
   pointsInWindow,
@@ -22,7 +19,6 @@ import {
 import type {
   Achievement,
   AuditEntry,
-  BracketMatch,
   LeaderboardRow,
   LoyaltyTransaction,
   Match,
@@ -36,9 +32,6 @@ import type {
   Promotion,
   RankingScope,
   Reward,
-  Tournament,
-  TournamentPlayerSlot,
-  TournamentStatus,
   UpcomingMatch,
   UpcomingMatchView,
   Venue,
@@ -214,45 +207,6 @@ function mapVenue(r: Row): Venue {
   };
 }
 
-function mapBracketMatch(r: Row): BracketMatch {
-  return {
-    id: r.id as string,
-    round: num(r.round),
-    roundName: r.round_name as string,
-    position: num(r.position),
-    aId: (r.a_id as string) ?? null,
-    bId: (r.b_id as string) ?? null,
-    scoreA: r.score_a == null ? null : num(r.score_a),
-    scoreB: r.score_b == null ? null : num(r.score_b),
-    winnerId: (r.winner_id as string) ?? null,
-    scheduledAt: isoOrNull(r.scheduled_at),
-    tableName: (r.table_name as string) ?? null,
-    nextMatchId: (r.next_match_id as string) ?? null,
-  };
-}
-
-function mapTournamentBase(r: Row): Omit<Tournament, "registrations" | "bracket"> {
-  return {
-    id: r.id as string,
-    slug: r.slug as string,
-    name: r.name as string,
-    cover: r.cover as string,
-    summary: r.summary as string,
-    format: r.format as Tournament["format"],
-    status: r.status as TournamentStatus,
-    startAt: isoOrNull(r.start_at),
-    registrationDeadline: isoOrNull(r.registration_deadline),
-    entryFee: num(r.entry_fee),
-    prizePool: num(r.prize_pool),
-    prizeBreakdown: (r.prize_breakdown as Tournament["prizeBreakdown"]) ?? [],
-    maxPlayers: num(r.max_players),
-    venue: r.venue as string,
-    rules: (r.rules as string[]) ?? [],
-    championId: (r.champion_id as string) ?? null,
-    bestOf: normalizeHostedBestOf(r.best_of),
-  };
-}
-
 /* -------------------------------------------------------------------- */
 /*  Derived stats — replayed from the match log (req 22)               */
 /* -------------------------------------------------------------------- */
@@ -297,8 +251,12 @@ export async function computeStats(): Promise<StatsBundle> {
     // rankings / stats are for players only — staff & admin accounts don't rank
     query<Row>(`SELECT * FROM player_profiles WHERE role = 'player'`),
     query<Row>(`SELECT * FROM matches ORDER BY played_at ASC`),
+    // titles = official tournaments won (the champion's team members)
     query<Row>(
-      `SELECT champion_id FROM tournaments WHERE champion_id IS NOT NULL`,
+      `SELECT m.player_id AS champion_id
+         FROM friend_tournaments t
+         JOIN friend_team_members m ON m.team_id = t.champion_team_id
+        WHERE t.official AND t.status = 'completed'`,
     ),
   ]);
 
@@ -563,39 +521,17 @@ export async function getLeaderboard(
 export type RankedLeaderboardRow = PlayerLite & Omit<RankedEntry, "playerId">;
 
 /**
- * The Ranked leaderboard: points from Cue Point's own hosted tournaments only
+ * The Ranked leaderboard: points from Cue Point's official tournaments only
  * (see ranked.ts). Empty until the first one is completed.
  */
 export async function getRankedLeaderboard(): Promise<{
   rows: RankedLeaderboardRow[];
   tournaments: number;
 }> {
-  const [tRows, mRows, { players }] = await Promise.all([
-    query<{ id: string; name: string; champion_id: string | null; start_at: Date | null }>(
-      `SELECT id, name, champion_id, COALESCE(start_at, created_at) AS start_at FROM tournaments WHERE status = 'completed'`,
-    ),
-    query<{ tournament_id: string; round: number; a_id: string | null; b_id: string | null; winner_id: string | null }>(
-      `SELECT m.tournament_id, m.round, m.a_id, m.b_id, m.winner_id
-         FROM tournament_matches m
-         JOIN tournaments t ON t.id = m.tournament_id AND t.status = 'completed'`,
-    ),
-    computeStats(),
-  ]);
-  const entries = computeRanked(
-    tRows.map((t) => ({
-      id: t.id,
-      name: t.name,
-      championId: t.champion_id,
-      completedAt: t.start_at ? new Date(t.start_at).toISOString() : "",
-    })),
-    mRows.map((m) => ({
-      tournamentId: m.tournament_id,
-      round: Number(m.round),
-      aId: m.a_id,
-      bId: m.b_id,
-      winnerId: m.winner_id,
-    })),
-  );
+  // loaded lazily: the friends store imports this module
+  const { officialResults } = await import("../friends/store");
+  const [results, { players }] = await Promise.all([officialResults(), computeStats()]);
+  const entries = computeRanked(results);
   const byId = new Map(players.map((p) => [p.id, p]));
   const rows: RankedLeaderboardRow[] = [];
   for (const e of entries) {
@@ -605,7 +541,31 @@ export async function getRankedLeaderboard(): Promise<{
     void _drop;
     rows.push({ ...toPlayerLite(p, rows.length + 1), ...rest });
   }
-  return { rows, tournaments: tRows.length };
+  return { rows, tournaments: results.length };
+}
+
+/** a player's official tournaments for their profile, newest first */
+async function officialHistory(playerId: string): Promise<PlayerProfileView["tournamentHistory"]> {
+  const { listOfficialTournaments, officialResults } = await import("../friends/store");
+  const [mine, results] = await Promise.all([listOfficialTournaments({ playerId }), officialResults()]);
+  const finishOf = new Map(results.map((r) => [r.id, r.finishes.get(playerId) ?? null]));
+  return mine.map((t) => {
+    const finish = finishOf.get(t.id);
+    return {
+      tournamentId: t.id,
+      name: t.name,
+      slug: t.slug,
+      status: t.status,
+      placement:
+        t.status === "completed"
+          ? finish
+            ? FINISH_LABEL[finish]
+            : "Played"
+          : t.status === "in_progress"
+            ? "Playing now"
+            : "Signed up",
+    };
+  });
 }
 
 function emptyState(): PlayerRatingState {
@@ -781,25 +741,14 @@ export async function getPlayerProfileView(
         [profile.id],
       ),
       getMatches({ playerId: profile.id, limit: 8 }),
-      getTournamentsForPlayer(profile.id),
+      officialHistory(profile.id),
       getUpcomingMatches(profile.id),
       queryOne<Row>(`SELECT * FROM membership_plans WHERE id = $1`, [
         profile.membershipTier,
       ]),
     ]);
 
-  const tournamentHistory = tournaments.map((t) => ({
-    tournamentId: t.id,
-    name: t.name,
-    slug: t.slug,
-    status: t.status,
-    placement:
-      t.championId === profile.id
-        ? "Champion"
-        : t.status === "completed"
-          ? placementFor(t, profile.id)
-          : null,
-  }));
+  const tournamentHistory = tournaments;
 
   return {
     profile,
@@ -810,22 +759,6 @@ export async function getPlayerProfileView(
     upcomingMatches,
     membershipPlan: planRow ? mapMembershipPlan(planRow) : null,
   };
-}
-
-function placementFor(t: Tournament, playerId: string): string | null {
-  const finals = t.bracket
-    .filter((m) => m.winnerId)
-    .sort((a, b) => b.round - a.round);
-  if (!finals.length) return "Participant";
-  const final = finals[0];
-  if (final.aId === playerId || final.bId === playerId) return "Runner-up";
-  const semi = t.bracket.filter(
-    (m) =>
-      m.round === final.round - 1 &&
-      (m.aId === playerId || m.bId === playerId),
-  );
-  if (semi.length) return "Semi-finalist";
-  return "Participant";
 }
 
 /* -------------------------------------------------------------------- */
@@ -915,145 +848,6 @@ export async function getPromotions(opts: {
 }
 
 /* -------------------------------------------------------------------- */
-/*  Tournaments                                                        */
-/* -------------------------------------------------------------------- */
-
-async function assembleTournaments(baseRows: Row[]): Promise<Tournament[]> {
-  if (!baseRows.length) return [];
-  const ids = baseRows.map((r) => r.id as string);
-  const [regRows, bracketRows] = await Promise.all([
-    query<Row>(
-      `SELECT * FROM tournament_registrations WHERE tournament_id = ANY($1)`,
-      [ids],
-    ),
-    query<Row>(
-      `SELECT * FROM tournament_matches WHERE tournament_id = ANY($1)
-       ORDER BY round, position`,
-      [ids],
-    ),
-  ]);
-  const regsByT = new Map<string, TournamentPlayerSlot[]>();
-  for (const r of regRows) {
-    const tid = r.tournament_id as string;
-    if (!regsByT.has(tid)) regsByT.set(tid, []);
-    regsByT.get(tid)!.push({
-      registrationId: r.id as string,
-      playerId: (r.player_id as string) ?? null,
-      seed: r.seed == null ? null : num(r.seed),
-    });
-  }
-  const bracketByT = new Map<string, BracketMatch[]>();
-  for (const r of bracketRows) {
-    const tid = r.tournament_id as string;
-    if (!bracketByT.has(tid)) bracketByT.set(tid, []);
-    bracketByT.get(tid)!.push(mapBracketMatch(r));
-  }
-  return baseRows.map((r) => {
-    const base = mapTournamentBase(r);
-    return {
-      ...base,
-      registrations: regsByT.get(base.id) ?? [],
-      bracket: bracketByT.get(base.id) ?? [],
-    };
-  });
-}
-
-export async function getTournaments(): Promise<Tournament[]> {
-  const rows = await query<Row>(`SELECT * FROM tournaments ORDER BY start_at NULLS LAST, created_at`);
-  return assembleTournaments(rows);
-}
-
-export async function getTournamentBySlug(
-  slug: string,
-): Promise<Tournament | undefined> {
-  const rows = await query<Row>(`SELECT * FROM tournaments WHERE slug = $1`, [
-    slug,
-  ]);
-  return (await assembleTournaments(rows))[0];
-}
-
-async function getTournamentsForPlayer(
-  playerId: string,
-): Promise<Tournament[]> {
-  const rows = await query<Row>(
-    `SELECT DISTINCT t.* FROM tournaments t
-     JOIN tournament_registrations tr ON tr.tournament_id = t.id
-     WHERE tr.player_id = $1 ORDER BY t.start_at NULLS LAST, t.created_at`,
-    [playerId],
-  );
-  return assembleTournaments(rows);
-}
-
-export function tournamentSpotsLeft(t: Tournament): number {
-  return Math.max(
-    0,
-    t.maxPlayers - t.registrations.filter((r) => r.playerId).length,
-  );
-}
-
-export function derivedTournamentStatus(t: Tournament): TournamentStatus {
-  if (t.status === "cancelled" || t.status === "completed") return t.status;
-  const now = Date.now();
-  if (t.championId) return "completed";
-  if (t.startAt && now >= +new Date(t.startAt)) return "live";
-  if (t.registrationDeadline && now > +new Date(t.registrationDeadline)) return "registration_closed";
-  return t.status === "upcoming" ? "upcoming" : "registration_open";
-}
-
-export interface RegistrationResult {
-  ok: boolean;
-  error?: string;
-  tournament?: Tournament;
-}
-
-export async function registerForTournament(
-  slug: string,
-  playerId: string,
-): Promise<RegistrationResult> {
-  const t = await getTournamentBySlug(slug);
-  if (!t) return { ok: false, error: "Tournament not found" };
-  // Cue Point-hosted tournaments are for registered player accounts only —
-  // no guests, and staff/admin accounts don't play in them
-  const player = await getPlayerById(playerId);
-  if (!player || player.role !== "player")
-    return { ok: false, error: "You need a player account to enter Cue Point tournaments." };
-  if (derivedTournamentStatus(t) !== "registration_open")
-    return { ok: false, error: "Registration is closed for this tournament" };
-  if (t.registrations.some((r) => r.playerId === playerId))
-    return { ok: false, error: "You are already registered" };
-  if (tournamentSpotsLeft(t) <= 0)
-    return { ok: false, error: "This tournament is full" };
-
-  try {
-    await query(
-      `INSERT INTO tournament_registrations (id, tournament_id, player_id, seed)
-       VALUES ($1,$2,$3,NULL)`,
-      ["reg_" + rid(), t.id, playerId],
-    );
-  } catch (e) {
-    if ((e as { code?: string }).code === "23505")
-      return { ok: false, error: "You are already registered" };
-    throw e;
-  }
-  await audit("system", "tournament.register", "tournament", t.id, `player ${playerId}`);
-  return { ok: true, tournament: await getTournamentBySlug(slug) };
-}
-
-export async function isRegistered(
-  slug: string,
-  playerId: string | null,
-): Promise<boolean> {
-  if (!playerId) return false;
-  const r = await queryOne(
-    `SELECT 1 FROM tournament_registrations tr
-     JOIN tournaments t ON t.id = tr.tournament_id
-     WHERE t.slug = $1 AND tr.player_id = $2`,
-    [slug, playerId],
-  );
-  return !!r;
-}
-
-/* -------------------------------------------------------------------- */
 /*  Staff: record an official match result (req 5)                     */
 /* -------------------------------------------------------------------- */
 
@@ -1065,8 +859,6 @@ export interface RecordMatchInput {
   scoreB: number;
   winnerId: string;
   tableName: string;
-  tournamentId?: string | null;
-  tournamentRound?: string | null;
   playedAt?: string;
 }
 
@@ -1094,23 +886,6 @@ export async function recordMatch(
   if (input.scoreA !== input.scoreB && higher !== input.winnerId)
     return { ok: false, error: "Winner does not match the scoreline" };
 
-  // a hosted-tournament match must finish the way its round is played
-  if (input.tournamentId) {
-    const [bm] = await query<{ round_name: string; best_of: Record<string, number> | null }>(
-      `SELECT m.round_name, t.best_of FROM tournament_matches m
-         JOIN tournaments t ON t.id = m.tournament_id
-        WHERE m.tournament_id = $1 AND m.winner_id IS NULL
-          AND ((m.a_id = $2 AND m.b_id = $3) OR (m.a_id = $3 AND m.b_id = $2))
-        ORDER BY m.round LIMIT 1`,
-      [input.tournamentId, a.id, b.id],
-    );
-    const bestOf = bm ? Number(bm.best_of?.[bm.round_name] ?? 1) : 1;
-    if (bestOf > 1) {
-      const problem = checkScore(bestOf, input.scoreA, input.scoreB);
-      if (problem) return { ok: false, error: `${bm!.round_name} is ${bestOfLabel(bestOf)}. ${problem}` };
-    }
-  }
-
   const before = (await computeStats()).stats;
   const aBefore = before.get(a.id)?.rankingPoints ?? RANKING_CONFIG.startPoints;
   const bBefore = before.get(b.id)?.rankingPoints ?? RANKING_CONFIG.startPoints;
@@ -1135,8 +910,8 @@ export async function recordMatch(
       input.scoreB,
       input.winnerId,
       input.tableName,
-      input.tournamentId ?? null,
-      input.tournamentRound ?? null,
+      null,
+      null,
       playedAt,
       aBefore,
       bBefore,
@@ -1161,17 +936,6 @@ export async function recordMatch(
     [a.id, aAfter, aRank, b.id, id, bAfter, `match ${ref}`, bRank],
   );
 
-  if (input.tournamentId) {
-    await advanceBracket(input.tournamentId, {
-      id,
-      aId: a.id,
-      bId: b.id,
-      scoreA: input.scoreA,
-      scoreB: input.scoreB,
-      winnerId: input.winnerId,
-    });
-  }
-
   await audit(
     actor,
     "match.create",
@@ -1185,62 +949,6 @@ export async function recordMatch(
   );
   return { ok: true, match: view };
 }
-
-async function advanceBracket(
-  tournamentId: string,
-  m: {
-    id: string;
-    aId: string;
-    bId: string;
-    scoreA: number;
-    scoreB: number;
-    winnerId: string;
-  },
-) {
-  const bmRows = await query<Row>(
-    `SELECT * FROM tournament_matches
-     WHERE tournament_id = $1 AND winner_id IS NULL
-       AND ((a_id = $2 AND b_id = $3) OR (a_id = $3 AND b_id = $2))
-     ORDER BY round LIMIT 1`,
-    [tournamentId, m.aId, m.bId],
-  );
-  const bm = bmRows[0];
-  if (!bm) return;
-
-  const scoreForBmA = bm.a_id === m.aId ? m.scoreA : m.scoreB;
-  const scoreForBmB = bm.a_id === m.aId ? m.scoreB : m.scoreA;
-
-  await transaction(async (client) => {
-    await client.query(
-      `UPDATE tournament_matches SET score_a=$2, score_b=$3, winner_id=$4 WHERE id=$1`,
-      [bm.id, scoreForBmA, scoreForBmB, m.winnerId],
-    );
-    if (bm.next_match_id) {
-      // fill first empty slot in the next match
-      await client.query(
-        `UPDATE tournament_matches
-         SET a_id = CASE WHEN a_id IS NULL THEN $2 ELSE a_id END,
-             b_id = CASE WHEN a_id IS NOT NULL AND b_id IS NULL THEN $2 ELSE b_id END
-         WHERE id = $1`,
-        [bm.next_match_id, m.winnerId],
-      );
-    } else {
-      await client.query(
-        `UPDATE tournaments SET champion_id = $2, status = 'completed' WHERE id = $1`,
-        [tournamentId, m.winnerId],
-      );
-    }
-    await client.query(
-      `INSERT INTO audit_log (id, actor, action, entity, entity_id, detail)
-       VALUES ($1,'system','tournament.advance','tournament',$2,$3)`,
-      ["au_" + rid(), tournamentId, `round ${bm.round}`],
-    );
-  });
-}
-
-/* -------------------------------------------------------------------- */
-/*  helpers                                                            */
-/* -------------------------------------------------------------------- */
 
 export async function audit(
   actor: string,
@@ -1489,266 +1197,6 @@ export async function getRankingHistory(
     at: iso(r.at),
     reason: r.reason as string,
   }));
-}
-
-/* ==================================================================== */
-/*  Staff: tournaments                                                  */
-/* ==================================================================== */
-
-export interface NewTournament {
-  name: string;
-  summary?: string;
-  format?: Tournament["format"];
-  startAt?: string | null;
-  registrationDeadline?: string | null;
-  entryFee?: number;
-  prizePool?: number;
-  maxPlayers?: number;
-  venue?: string;
-  rules?: string[];
-  cover?: string;
-  /** match length per round name — see lib/ecosystem/hosted.ts */
-  bestOf?: unknown;
-}
-
-export async function createTournament(
-  input: NewTournament,
-  actor: string,
-): Promise<Tournament> {
-  const id = "t_" + rid();
-  let slug = slugify(input.name) || "tournament";
-  let n = 1;
-  while (await queryOne(`SELECT 1 FROM tournaments WHERE slug = $1`, [slug])) {
-    slug = `${slugify(input.name)}-${++n}`;
-  }
-  const pool = input.prizePool ?? 0;
-  await query(
-    `INSERT INTO tournaments
-      (id, slug, name, cover, summary, format, status, start_at,
-       registration_deadline, entry_fee, prize_pool, prize_breakdown,
-       max_players, venue, rules, best_of)
-     VALUES ($1,$2,$3,$4,$5,$6,'registration_open',$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-    [
-      id,
-      slug,
-      input.name.trim(),
-      input.cover ?? "winter",
-      input.summary ?? "",
-      input.format ?? "single_elim",
-      input.startAt || null,
-      input.registrationDeadline || null,
-      input.entryFee ?? 0,
-      pool,
-      JSON.stringify(
-        pool > 0
-          ? [
-              { place: "Champion", amount: Math.round(pool * 0.55) },
-              { place: "Runner-up", amount: Math.round(pool * 0.25) },
-              { place: "Semi-finalists", amount: Math.round(pool * 0.1) },
-            ]
-          : [],
-      ),
-      input.maxPlayers ?? 8,
-      input.venue ?? "Cue Point Pool Parlour, Pitipana",
-      JSON.stringify(input.rules ?? []),
-      JSON.stringify(normalizeHostedBestOf(input.bestOf)),
-    ],
-  );
-  await audit(actor, "tournament.create", "tournament", id, input.name);
-  return (await getTournamentBySlug(slug))!;
-}
-
-/** step 1 of cancelling a hosted tournament: a code staff must type back */
-export async function requestHostedCancelCode(slug: string): Promise<string | null> {
-  const { code, hash, expires } = newCancelCode();
-  const rows = await query<{ id: string }>(
-    `UPDATE tournaments SET cancel_code_hash = $2, cancel_code_expires = $3
-      WHERE slug = $1 AND status NOT IN ('completed','cancelled') RETURNING id`,
-    [slug, hash, expires],
-  );
-  return rows[0] ? code : null;
-}
-
-export class CancelCodeError extends Error {}
-
-export async function setTournamentStatus(
-  slug: string,
-  status: TournamentStatus,
-  actor: string,
-  code?: unknown,
-): Promise<Tournament | undefined> {
-  if (status === "cancelled") {
-    const [t] = await query<{ cancel_code_hash: string | null; cancel_code_expires: Date | null }>(
-      `SELECT cancel_code_hash, cancel_code_expires FROM tournaments WHERE slug = $1`,
-      [slug],
-    );
-    if (!t || !cancelCodeOk(code, t.cancel_code_hash, t.cancel_code_expires))
-      throw new CancelCodeError("That code doesn't match or has expired. Get a new code and try again.");
-  }
-  await query(
-    `UPDATE tournaments SET status = $2, cancel_code_hash = NULL, cancel_code_expires = NULL WHERE slug = $1`,
-    [slug, status],
-  );
-  await audit(actor, "tournament.status", "tournament", slug, status);
-  return getTournamentBySlug(slug);
-}
-
-function roundLabel(round: number, totalRounds: number): string {
-  return hostedRoundLabel(round, totalRounds);
-}
-
-/** set how long each round's matches are (already-played matches keep their scores) */
-export async function setTournamentBestOf(
-  slug: string,
-  bestOf: unknown,
-  actor: string,
-): Promise<Tournament | null> {
-  const clean = normalizeHostedBestOf(bestOf);
-  const rows = await query<{ id: string }>(
-    `UPDATE tournaments SET best_of = $2 WHERE slug = $1 RETURNING id`,
-    [slug, JSON.stringify(clean)],
-  );
-  if (!rows[0]) return null;
-  await audit(actor, "tournament.best_of", "tournament", rows[0].id, JSON.stringify(clean));
-  return (await getTournamentBySlug(slug)) ?? null;
-}
-
-export interface BracketResult {
-  ok: boolean;
-  error?: string;
-  tournament?: Tournament;
-}
-
-/**
- * Build a single-elimination bracket from the current registrations.
- * Supports 4 / 8 / 16 players (seeds them 1..n, standard bracket pairing).
- */
-export async function generateBracket(
-  slug: string,
-  actor: string,
-): Promise<BracketResult> {
-  const t = await getTournamentBySlug(slug);
-  if (!t) return { ok: false, error: "Tournament not found" };
-  if (t.bracket.length)
-    return { ok: false, error: "Bracket already generated" };
-
-  const regs = t.registrations.filter((r) => r.playerId);
-  const size = [4, 8, 16].reverse().find((s) => regs.length >= s) ?? 0;
-  if (!size)
-    return {
-      ok: false,
-      error: `Need at least 4 registered players (have ${regs.length})`,
-    };
-
-  // rank registrants by current ranking points for seeding
-  const { stats } = await computeStats();
-  const seeded = [...regs]
-    .sort(
-      (a, b) =>
-        (stats.get(b.playerId!)?.rankingPoints ?? 0) -
-        (stats.get(a.playerId!)?.rankingPoints ?? 0),
-    )
-    .slice(0, size)
-    .map((r) => r.playerId!);
-
-  // standard seed positions for a bracket of `size`
-  const order = seedOrder(size); // e.g. [1,8,4,5,2,7,3,6] as 0-indexed
-  const firstRound = order.map((i) => seeded[i]);
-
-  const totalRounds = Math.log2(size);
-  const nodes: {
-    id: string;
-    round: number;
-    position: number;
-    aId: string | null;
-    bId: string | null;
-    nextId: string | null;
-  }[] = [];
-
-  // build empty structure round by round
-  const idsByRound: string[][] = [];
-  for (let round = 1; round <= totalRounds; round++) {
-    const count = size / 2 ** round;
-    const ids: string[] = [];
-    for (let pos = 0; pos < count; pos++) {
-      const id = `${slug}-r${round}-${pos}`;
-      ids.push(id);
-      nodes.push({ id, round, position: pos, aId: null, bId: null, nextId: null });
-    }
-    idsByRound.push(ids);
-  }
-  // link winners forward
-  for (let round = 1; round < totalRounds; round++) {
-    idsByRound[round - 1].forEach((id, pos) => {
-      const node = nodes.find((n) => n.id === id)!;
-      node.nextId = idsByRound[round][Math.floor(pos / 2)];
-    });
-  }
-  // seed round 1
-  idsByRound[0].forEach((id, pos) => {
-    const node = nodes.find((n) => n.id === id)!;
-    node.aId = firstRound[pos * 2] ?? null;
-    node.bId = firstRound[pos * 2 + 1] ?? null;
-  });
-
-  await transaction(async (client) => {
-    // register seeds
-    for (let i = 0; i < seeded.length; i++) {
-      await client.query(
-        `UPDATE tournament_registrations SET seed = $3
-         WHERE tournament_id = $1 AND player_id = $2`,
-        [t.id, seeded[i], i + 1],
-      );
-    }
-    for (const node of nodes) {
-      await client.query(
-        `INSERT INTO tournament_matches
-          (id, tournament_id, round, round_name, position, a_id, b_id,
-           scheduled_at, table_name, next_match_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          node.id,
-          t.id,
-          node.round,
-          roundLabel(node.round, totalRounds),
-          node.position,
-          node.aId,
-          node.bId,
-          null,
-          null,
-          node.nextId,
-        ],
-      );
-    }
-    await client.query(
-      `UPDATE tournaments SET status = 'live' WHERE id = $1`,
-      [t.id],
-    );
-  });
-
-  await audit(
-    actor,
-    "tournament.bracket",
-    "tournament",
-    t.id,
-    `${size}-player single elimination`,
-  );
-  return { ok: true, tournament: await getTournamentBySlug(slug) };
-}
-
-/** 0-indexed seed positions for a single-elim bracket (1 v n, etc.) */
-function seedOrder(size: number): number[] {
-  let rounds = [0, 1];
-  while (rounds.length < size) {
-    const next: number[] = [];
-    const total = rounds.length * 2 - 1;
-    for (const r of rounds) {
-      next.push(r);
-      next.push(total - r);
-    }
-    rounds = next;
-  }
-  return rounds;
 }
 
 /* ==================================================================== */

@@ -32,6 +32,7 @@ import {
   bestOfFor,
   bestOfLabel,
   checkScore,
+  formatLine,
   type BlockingTie,
   type PlanGame,
   type Stage,
@@ -69,6 +70,8 @@ import type {
   MemberView,
   MyPlay,
   NotificationItem,
+  OfficialInfo,
+  OfficialListItem,
   PlayerRef,
   ResultStatus,
   TeamView,
@@ -220,6 +223,15 @@ interface TournamentRow {
   tiebreaks: { group: number | null; teams: string[] }[];
   cancel_code_hash: string | null;
   cancel_code_expires: Date | null;
+  /** hosted by Cue Point: public, players sign themselves up, staff run it */
+  official: boolean;
+  slug: string | null;
+  summary: string | null;
+  entry_fee: number | null;
+  prize_pool: number | null;
+  rules: string | null;
+  start_at: Date | null;
+  registration_deadline: Date | null;
 }
 
 const settingsOf = (t: Pick<TournamentRow, "kind" | "settings">): TournamentSettings =>
@@ -571,10 +583,11 @@ export async function getTournamentView(
 
   const rawTeams = await loadTeams(pooled, { tournamentId: id });
   const teams = rawTeams.map((r) => toTeamView(r, t.players_per_team));
-  const isOrganizer = t.organizer_id === actor.id;
-  const myTeam = teams.find((x) => x.members.some((m) => m.id === actor.id)) ?? null;
+  // staff run every official tournament; anyone may watch one
+  const isOrganizer = t.organizer_id === actor.id || (t.official && isMod(actor));
+  const myTeam = actor.id ? (teams.find((x) => x.members.some((m) => m.id === actor.id)) ?? null) : null;
   const myMember = myTeam?.members.find((m) => m.id === actor.id) ?? null;
-  if (!isOrganizer && !myMember && !isMod(actor)) return null;
+  if (!t.official && !isOrganizer && !myMember && !isMod(actor)) return null;
 
   const gameRows = await pooled<GameRow>(
     `SELECT * FROM friend_games WHERE tournament_id = $1 ORDER BY round, position`,
@@ -712,6 +725,9 @@ export async function getTournamentView(
     canCancel: (open || t.status === "in_progress") && (isOrganizer || isMod(actor)),
     canLeave: open && !!myMember,
     canEditFormat: open && isOrganizer,
+    canRegister:
+      open && t.official && !!actor.id && actor.role === "player" && !myMember && !signupClosed(t, teams.length),
+    signedOut: !actor.id,
   };
 
   const [org] = [...(await loadPlayerRefs(pooled, [t.organizer_id])).values()];
@@ -725,6 +741,7 @@ export async function getTournamentView(
     seeding: t.seeding,
     status: t.status,
     organizer: org ?? GHOST,
+    official: t.official ? officialInfo(t, teams.length) : null,
     teams,
     teamsComplete: teams.filter((x) => x.complete).length,
     playersJoined: teams.reduce(
@@ -1163,6 +1180,7 @@ export async function canSubscribe(actor: Actor, topic: string): Promise<boolean
       `SELECT 1 AS ok FROM friend_games g
         WHERE g.id = $1
           AND (g.organizer_id = $2
+               OR EXISTS (SELECT 1 FROM friend_tournaments ot WHERE ot.id = g.tournament_id AND ot.official)
                OR EXISTS (SELECT 1 FROM friend_team_members m
                            WHERE m.game_id = g.id AND m.player_id = $2))`,
       [id, actor.id],
@@ -1173,7 +1191,7 @@ export async function canSubscribe(actor: Actor, topic: string): Promise<boolean
     const rows = await pooled<{ ok: number }>(
       `SELECT 1 AS ok FROM friend_tournaments t
         WHERE t.id = $1
-          AND (t.organizer_id = $2
+          AND (t.official OR t.organizer_id = $2
                OR EXISTS (SELECT 1 FROM friend_team_members m
                            WHERE m.tournament_id = t.id AND m.player_id = $2))`,
       [id, actor.id],
@@ -1281,8 +1299,8 @@ async function teamPlayerIds(c: PoolClient, teamId: string | null): Promise<stri
 async function syncInhouseMatch(c: PoolClient, gameId: string) {
   await c.query(`DELETE FROM matches WHERE friend_game_id = $1`, [gameId]);
   const [g] = (
-    await c.query<GameRow & { t_eligible: boolean | null; t_name: string | null }>(
-      `SELECT g.*, t.points_eligible AS t_eligible, t.name AS t_name
+    await c.query<GameRow & { t_eligible: boolean | null; t_official: boolean | null; t_name: string | null }>(
+      `SELECT g.*, (t.points_eligible OR t.official) AS t_eligible, t.official AS t_official, t.name AS t_name
          FROM friend_games g LEFT JOIN friend_tournaments t ON t.id = g.tournament_id
         WHERE g.id = $1`,
       [gameId],
@@ -1312,7 +1330,7 @@ async function syncInhouseMatch(c: PoolClient, gameId: string) {
     [
       nid("m"),
       "CP-F-" + globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase(),
-      g.tournament_id ? "ranked" : "casual",
+      g.t_official ? "tournament" : g.tournament_id ? "ranked" : "casual",
       a,
       b,
       g.score_a ?? (winner === a ? 1 : 0),
@@ -2592,6 +2610,8 @@ async function checkNewTeam(
   if (ids.length !== playerIds.length)
     throw new FriendsError(400, "A player can't be on the same team twice.");
   const guests = guestNames.map(cleanGuestName);
+  if (t.official && guests.length)
+    throw new FriendsError(400, "Official tournaments are for Cue Point members only — no guests.");
   const sizeErr = validateTeamSize(f, ids.length + guests.length);
   if (sizeErr) throw new FriendsError(400, sizeErr);
   await checkGuestNames(c, t, guests);
@@ -2623,7 +2643,7 @@ async function insertTeam(
   const teamId = nid("ft");
   await c.query(`INSERT INTO friend_teams (id, tournament_id) VALUES ($1,$2)`, [teamId, t.id]);
   for (const pid of playerIds) {
-    const self = pid === t.organizer_id;
+    const self = pid === t.organizer_id || t.official;
     await c.query(
       `INSERT INTO friend_team_members
          (team_id, player_id, tournament_id, status, invited_by, responded_at)
@@ -2651,9 +2671,17 @@ export async function createTournament(
     seeding?: unknown;
     teams?: TeamInput[];
     settings?: unknown;
+    /** staff only: a Cue Point-hosted tournament with these event details */
+    official?: OfficialInput | null;
   },
 ): Promise<string> {
-  if (actor.role !== "player") throw new FriendsError(403, "Only players can create tournaments.");
+  const official = input.official ? cleanOfficial(input.official) : null;
+  if (official) {
+    if (!isMod(actor)) throw new FriendsError(403, "Only Cue Point staff can create official tournaments.");
+    if (input.format !== "1v1") throw new FriendsError(400, "Official tournaments are singles (1 v 1).");
+    if ((input.teams ?? []).some((t) => t.guests.length))
+      throw new FriendsError(400, "Official tournaments are for Cue Point members only — no guests.");
+  } else if (actor.role !== "player") throw new FriendsError(403, "Only players can create tournaments.");
   if (!isFormat(input.format)) throw new FriendsError(400, "Choose 1v1 or 2v2.");
   const f = FORMATS[input.format];
   const capacity = Number(input.capacityTeams);
@@ -2679,7 +2707,7 @@ export async function createTournament(
         WHERE organizer_id = $1 AND status IN ('registration_open','in_progress')`,
       [actor.id],
     );
-    if ((open?.n ?? 0) >= MAX_OPEN_TOURNAMENTS_PER_ORGANIZER)
+    if (!official && (open?.n ?? 0) >= MAX_OPEN_TOURNAMENTS_PER_ORGANIZER)
       throw new FriendsError(
         400,
         `You already have ${MAX_OPEN_TOURNAMENTS_PER_ORGANIZER} unfinished tournaments. Finish or cancel one first.`,
@@ -2692,6 +2720,24 @@ export async function createTournament(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [id, name, actor.id, f.code, f.playersPerTeam, capacity, seeding, settings.kind, JSON.stringify(settings)],
     );
+    if (official) {
+      await c.query(
+        `UPDATE friend_tournaments
+            SET official = true, slug = $2, summary = $3, entry_fee = $4, prize_pool = $5,
+                rules = $6, start_at = $7, registration_deadline = $8
+          WHERE id = $1`,
+        [
+          id,
+          await uniqueSlug(c, name),
+          official.summary,
+          official.entryFee,
+          official.prizePool,
+          official.rules,
+          official.startAt,
+          official.registrationDeadline,
+        ],
+      );
+    }
     const t = await lockTournament(c, id);
     const batch = new Batch(c);
     for (const team of teams) {
@@ -2702,6 +2748,264 @@ export async function createTournament(
     await batch.flush();
     return id;
   });
+}
+
+/* -------------------------------------------------------------------- */
+/*  Official tournaments — hosted by Cue Point, public, self sign-up    */
+/* -------------------------------------------------------------------- */
+
+export interface OfficialInput {
+  summary?: unknown;
+  entryFee?: unknown;
+  prizePool?: unknown;
+  rules?: unknown;
+  startAt?: unknown;
+  registrationDeadline?: unknown;
+}
+
+function cleanOfficial(raw: OfficialInput) {
+  const text = (v: unknown, max: number) => {
+    const s = String(v ?? "").trim().slice(0, max);
+    return s || null;
+  };
+  const money = (v: unknown) => {
+    if (v === "" || v == null) return null;
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < 0 || n > 10_000_000) throw new FriendsError(400, "Enter a sensible amount in LKR.");
+    return n;
+  };
+  const when = (v: unknown, label: string) => {
+    if (v === "" || v == null) return null;
+    // the form sends Sri Lanka local time without a zone
+    const s = String(v);
+    const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s}+05:30`);
+    if (Number.isNaN(+d)) throw new FriendsError(400, `${label} isn't a valid date.`);
+    return d;
+  };
+  const rules = String(raw.rules ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .map((l) => l.slice(0, 200))
+    .join("\n");
+  return {
+    summary: text(raw.summary, 200),
+    entryFee: money(raw.entryFee),
+    prizePool: money(raw.prizePool),
+    rules: rules || null,
+    startAt: when(raw.startAt, "The start"),
+    registrationDeadline: when(raw.registrationDeadline, "The sign-up deadline"),
+  };
+}
+
+async function uniqueSlug(c: PoolClient, name: string): Promise<string> {
+  const base =
+    name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 50) || "tournament";
+  for (let i = 1; ; i++) {
+    const slug = i === 1 ? base : `${base}-${i}`;
+    const [hit] = await inTx(c)<{ id: string }>(`SELECT id FROM friend_tournaments WHERE slug = $1`, [slug]);
+    if (!hit) return slug;
+  }
+}
+
+function signupClosed(t: TournamentRow, entries: number): boolean {
+  if (t.status !== "registration_open") return true;
+  if (entries >= t.capacity_teams) return true;
+  return !!t.registration_deadline && Date.now() > +new Date(t.registration_deadline);
+}
+
+function officialInfo(t: TournamentRow, entries: number): OfficialInfo {
+  return {
+    slug: t.slug ?? t.id,
+    summary: t.summary,
+    entryFee: t.entry_fee,
+    prizePool: t.prize_pool,
+    rules: (t.rules ?? "").split("\n").filter(Boolean),
+    startAt: isoOrNull(t.start_at),
+    registrationDeadline: isoOrNull(t.registration_deadline),
+    signupClosed: signupClosed(t, entries),
+  };
+}
+
+/** a player signs themselves up for an official tournament */
+export async function registerForOfficial(tournamentId: string, actor: Actor) {
+  if (actor.role !== "player") throw new FriendsError(403, "Staff accounts can't enter tournaments.");
+  await transaction(async (c) => {
+    const t = await lockTournament(c, tournamentId);
+    if (!t.official) throw new FriendsError(404, "Tournament not found");
+    assertOpen(t);
+    const [already] = await inTx(c)<{ ok: number }>(
+      `SELECT 1 AS ok FROM friend_team_members WHERE tournament_id = $1 AND player_id = $2`,
+      [tournamentId, actor.id],
+    );
+    if (already) throw new FriendsError(409, "You're already signed up.");
+    const [{ n }] = await inTx(c)<{ n: number }>(
+      `SELECT count(*)::int AS n FROM friend_teams WHERE tournament_id = $1`,
+      [tournamentId],
+    );
+    if (n >= t.capacity_teams) throw new FriendsError(409, "Sorry — every place is taken.");
+    if (t.registration_deadline && Date.now() > +new Date(t.registration_deadline))
+      throw new FriendsError(409, "Sign-up for this tournament has closed.");
+    await checkNewTeam(c, t, [actor.id]);
+    const batch = new Batch(c);
+    await insertTeam(c, batch, t, [actor.id], actor);
+    batch.touch(`user:${actor.id}`);
+    await bumpTournament(c, tournamentId);
+    await touchTournament(c, batch, tournamentId);
+    await batch.flush();
+  });
+}
+
+/** the id behind an official tournament's public address */
+export async function officialIdBySlug(slug: string): Promise<string | null> {
+  const [r] = await pooled<{ id: string }>(
+    `SELECT id FROM friend_tournaments WHERE official AND (slug = $1 OR id = $1)`,
+    [slug],
+  );
+  return r?.id ?? null;
+}
+
+/** an official tournament's public address, if this id is one */
+export async function officialSlugOf(id: string): Promise<string | null> {
+  const [r] = await pooled<{ slug: string | null }>(
+    `SELECT slug FROM friend_tournaments WHERE id = $1 AND official`,
+    [id],
+  );
+  return r ? (r.slug ?? id) : null;
+}
+
+/** every official tournament (cancelled ones left out), newest first */
+export async function listOfficialTournaments(opts: { playerId?: string } = {}): Promise<OfficialListItem[]> {
+  const rows = await pooled<TournamentRow & { entries: number }>(
+    `SELECT t.*, (SELECT count(*)::int FROM friend_teams ft WHERE ft.tournament_id = t.id) AS entries
+       FROM friend_tournaments t
+      WHERE t.official AND t.status <> 'cancelled'
+        AND ($1::text IS NULL OR EXISTS (
+              SELECT 1 FROM friend_team_members m WHERE m.tournament_id = t.id AND m.player_id = $1))
+      ORDER BY t.created_at DESC`,
+    [opts.playerId ?? null],
+  );
+  const champTeams = rows.map((r) => r.champion_team_id).filter((x): x is string => !!x);
+  const champs = champTeams.length
+    ? await pooled<{ team_id: string; player_id: string }>(
+        `SELECT team_id, player_id FROM friend_team_members WHERE team_id = ANY($1)`,
+        [champTeams],
+      )
+    : [];
+  const refs = await loadPlayerRefs(pooled, champs.map((c) => c.player_id));
+  const champOf = new Map(champs.map((c) => [c.team_id, refs.get(c.player_id) ?? null]));
+  return rows.map((t) => ({
+    id: t.id,
+    slug: t.slug ?? t.id,
+    name: t.name,
+    summary: t.summary,
+    kind: t.kind,
+    formatLine: formatLine(settingsOf(t)),
+    status: t.status,
+    capacity: t.capacity_teams,
+    registered: t.entries,
+    entryFee: t.entry_fee,
+    prizePool: t.prize_pool,
+    startAt: isoOrNull(t.start_at),
+    registrationDeadline: isoOrNull(t.registration_deadline),
+    signupClosed: signupClosed(t, t.entries),
+    champion: t.champion_team_id ? (champOf.get(t.champion_team_id) ?? null) : null,
+    createdAt: iso(t.created_at),
+  }));
+}
+
+/** how far one player got in a finished official tournament */
+export type OfficialFinish = "champion" | "runner_up" | "semi_final" | "quarter_final" | "round_of_16" | "played";
+
+export interface OfficialResult {
+  id: string;
+  slug: string;
+  name: string;
+  completedAt: string;
+  /** player id → their finish */
+  finishes: Map<string, OfficialFinish>;
+  /** every decided match between two players */
+  games: { a: string; b: string; winner: string }[];
+}
+
+const FINISH_RANK: OfficialFinish[] = ["champion", "runner_up", "semi_final", "quarter_final", "round_of_16", "played"];
+
+/**
+ * Finished official tournaments, with where every player finished.
+ * Champion / runner-up / semi-finalists come from the podium; the rest
+ * from the knockout round they went out in (quarter final, last 16) or,
+ * in a league, their place in the table (3rd–4th, 5th–8th, 9th–16th).
+ */
+export async function officialResults(): Promise<OfficialResult[]> {
+  const rows = await pooled<TournamentRow>(
+    `SELECT * FROM friend_tournaments WHERE official AND status = 'completed' ORDER BY completed_at`,
+  );
+  const out: OfficialResult[] = [];
+  for (const t of rows) {
+    const [games, members, teams] = await Promise.all([
+      pooled<GameRow>(`SELECT * FROM friend_games WHERE tournament_id = $1 ORDER BY round, position`, [t.id]),
+      pooled<{ team_id: string; player_id: string }>(
+        `SELECT team_id, player_id FROM friend_team_members WHERE tournament_id = $1`,
+        [t.id],
+      ),
+      pooled<{ id: string; seed: number | null }>(
+        `SELECT id, seed FROM friend_teams WHERE tournament_id = $1 ORDER BY created_at, id`,
+        [t.id],
+      ),
+    ]);
+    const playerOf = new Map(members.map((m) => [m.team_id, m.player_id]));
+    const tables = buildTables(t, seedOrderOf(teams), games);
+    const p = placementsFrom(t, games, tables);
+
+    const best = new Map<string, OfficialFinish>();
+    const set = (team: string | null | undefined, f: OfficialFinish) => {
+      const pid = team ? playerOf.get(team) : undefined;
+      if (!pid) return;
+      const cur = best.get(pid);
+      if (!cur || FINISH_RANK.indexOf(f) < FINISH_RANK.indexOf(cur)) best.set(pid, f);
+    };
+    for (const m of members) set(m.team_id, "played");
+    // a single league table: the place in it
+    if (tables.length === 1)
+      tables[0].rows.forEach((r, i) => {
+        const place = i + 1;
+        set(r.teamId, place <= 4 ? "semi_final" : place <= 8 ? "quarter_final" : place <= 16 ? "round_of_16" : "played");
+      });
+    // knockout rounds: going out in the quarter finals / last 16
+    for (const g of games) {
+      if (g.is_bye || !g.winner_team_id || !g.team_a_id || !g.team_b_id) continue;
+      const loser = g.winner_team_id === g.team_a_id ? g.team_b_id : g.team_a_id;
+      const label = g.label ?? "";
+      if (/quarter/i.test(label)) set(loser, "quarter_final");
+      else if (/round of 16/i.test(label)) set(loser, "round_of_16");
+    }
+    for (const team of p.semis) set(team, "semi_final");
+    if (p.runnerUp) set(p.runnerUp, "runner_up");
+    for (const team of [p.champion, ...p.groupWinners.map((w) => w.teamId)]) set(team, "champion");
+
+    out.push({
+      id: t.id,
+      slug: t.slug ?? t.id,
+      name: t.name,
+      completedAt: iso(t.completed_at ?? t.created_at),
+      finishes: best,
+      games: games
+        .filter((g) => !g.is_bye && g.winner_team_id && g.team_a_id && g.team_b_id)
+        .map((g) => ({
+          a: playerOf.get(g.team_a_id!) ?? "",
+          b: playerOf.get(g.team_b_id!) ?? "",
+          winner: playerOf.get(g.winner_team_id!) ?? "",
+        }))
+        .filter((g) => g.a && g.b && g.winner),
+    });
+  }
+  return out;
 }
 
 function assertOrganizer(t: TournamentRow, actor: Actor) {
@@ -2753,6 +3057,8 @@ export async function addTeamGuest(
     const t = await lockTournament(c, tournamentId);
     assertOrganizer(t, actor);
     assertOpen(t);
+    if (t.official)
+      throw new FriendsError(400, "Official tournaments are for Cue Point members only — no guests.");
     const name = cleanGuestName(rawName);
     const [team] = await inTx(c)<{ id: string; n: number }>(
       `SELECT ft.id,
@@ -3054,7 +3360,7 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
           AND started_at > now() - interval '24 hours'`,
       [rkey, t.id],
     );
-    const eligible = (recent?.n ?? 0) < MAX_POINTED_TOURNAMENTS_PER_ROSTER_PER_DAY;
+    const eligible = !t.official && (recent?.n ?? 0) < MAX_POINTED_TOURNAMENTS_PER_ROSTER_PER_DAY;
     await c.query(
       `UPDATE friend_tournaments
           SET status = 'in_progress', started_at = now(), roster_key = $2, points_eligible = $3

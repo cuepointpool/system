@@ -20,15 +20,34 @@ import { Card, Notice, PrimaryButton } from "./ui";
    ------------------------------------------------------------------ */
 
 const STEPS = ["Game", "Players", "How to play", "Check"] as const;
+const OFFICIAL_STEPS = ["Event", "Players", "How to play", "Check"] as const;
 
-export function NewTournament({ me }: { me: PickedPlayer }) {
+const RULES =
+  "8-Ball, World Rules.\nWinner breaks. Standard 3-foul rule.\nBe at the venue 15 minutes before your match.";
+
+/**
+ * `official`: Cue Point staff creating a house tournament — the first step
+ * asks for the event details instead of singles / doubles (official ones
+ * are singles), players sign themselves up later, and guests aren't allowed.
+ */
+export function NewTournament({ me, official = false }: { me: PickedPlayer | null; official?: boolean }) {
   const router = useRouter();
+  const steps = official ? OFFICIAL_STEPS : STEPS;
   const [step, setStep] = useState(0);
+  const [event, setEvent] = useState({
+    summary: "",
+    entryFee: "",
+    prizePool: "",
+    startAt: "",
+    registrationDeadline: "",
+    rules: RULES,
+  });
   const [format, setFormat] = useState<FormatCode>("1v1");
   const [name, setName] = useState("");
   const [teams, setTeams] = useState<PickedPlayer[][]>([]);
   const [draft, setDraft] = useState<PickedPlayer[]>([]);
-  const [places, setPlaces] = useState<number | null>(null); // null = same as the players added
+  // null = same as the players added (official: 8 to start with, players sign up later)
+  const [places, setPlaces] = useState<number | null>(official ? 8 : null);
   const [settings, setSettings] = useState<TournamentSettings>(DEFAULT_SETTINGS);
   const [styleChosen, setStyleChosen] = useState(false);
   const [seeding, setSeeding] = useState<"random" | "ranking">("random");
@@ -64,8 +83,9 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
   async function create() {
     setBusy(true);
     setError(null);
-    const r = await apiPost<{ id: string }>("/api/friends/tournaments", {
+    const r = await apiPost<{ id: string; slug: string | null }>("/api/friends/tournaments", {
       name,
+      official: official ? event : null,
       format,
       capacityTeams: size,
       seeding,
@@ -80,19 +100,19 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
       setBusy(false);
       return;
     }
-    router.push(`/play/tournaments/${r.data.id}`);
+    router.push(r.data.slug ? `/tournaments/${r.data.slug}` : `/play/tournaments/${r.data.id}`);
   }
 
   const canNext =
-    step === 0 ||
-    (step === 1 && teams.length >= MIN_TEAMS_TO_START && draft.length === 0) ||
+    (step === 0 && (!official || name.trim().length > 0)) ||
+    (step === 1 && (official || teams.length >= MIN_TEAMS_TO_START) && draft.length === 0) ||
     (step === 2 && !formatProblem);
 
   return (
     <div className="mx-auto max-w-2xl">
       {/* progress */}
       <ol className="mb-6 grid grid-cols-4 gap-2" aria-label="Steps">
-        {STEPS.map((label, i) => (
+        {steps.map((label, i) => (
           <li key={label}>
             <button
               type="button"
@@ -110,7 +130,11 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
       </ol>
 
       <Card className="p-5 sm:p-7">
-        {step === 0 && (
+        {step === 0 && official && (
+          <EventStep name={name} setName={setName} event={event} setEvent={setEvent} />
+        )}
+
+        {step === 0 && !official && (
           <>
             <h2 className="font-display text-2xl font-bold text-white">Singles or doubles?</h2>
             <p className="mt-1 text-sm text-mist">8-Ball on 9-foot tables.</p>
@@ -157,13 +181,17 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
 
         {step === 1 && (
           <>
-            <h2 className="font-display text-2xl font-bold text-white">Who&apos;s playing?</h2>
+            <h2 className="font-display text-2xl font-bold text-white">
+              {official ? "How many players?" : <>Who&apos;s playing?</>}
+            </h2>
             <p className="mt-1 text-sm text-mist">
-              {ppt === 1
-                ? `Add at least ${MIN_TEAMS_TO_START} players. You can add more later.`
-                : `Add teams of two — pick two people for each team. At least ${MIN_TEAMS_TO_START} teams.`}
+              {official
+                ? "Set the number of places. Players sign themselves up on the tournament page — you can also add members here now."
+                : ppt === 1
+                  ? `Add at least ${MIN_TEAMS_TO_START} players. You can add more later.`
+                  : `Add teams of two — pick two people for each team. At least ${MIN_TEAMS_TO_START} teams.`}
             </p>
-            {!taken(me.id) && (
+            {me && !official && !taken(me.id) && (
               <button
                 type="button"
                 onClick={() => pick(me)}
@@ -176,11 +204,13 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
               <p className="mb-2 text-sm font-semibold text-white">Find a Cue Point member</p>
               <PlayerPicker exclude={new Set()} onPick={pick} />
             </div>
-            <div className="mt-4">
-              <p className="mb-1 text-sm font-semibold text-white">Not a member? Type their name</p>
-              <p className="mb-2 text-xs text-mist">They can play, but their matches don&apos;t earn points.</p>
-              <GuestAdder onAdd={pick} />
-            </div>
+            {!official && (
+              <div className="mt-4">
+                <p className="mb-1 text-sm font-semibold text-white">Not a member? Type their name</p>
+                <p className="mb-2 text-xs text-mist">They can play, but their matches don&apos;t earn points.</p>
+                <GuestAdder onAdd={pick} />
+              </div>
+            )}
             {draft.length > 0 && (
               <p className="mt-4 rounded-xl border border-dashed border-[#a78bfa]/50 px-4 py-3 text-sm text-[#c4b5fd]">
                 {draft.map((p) => p.nickname).join(" & ")} — add one more person to finish this team.{" "}
@@ -225,7 +255,9 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
                 Places in the tournament: <strong>{size}</strong>
               </p>
               <p className="mt-0.5 text-xs text-mist">
-                Leave room if more {noun}s will join later — you can invite them from the tournament page.
+                {official
+                  ? "Sign-up closes by itself when every place is taken."
+                  : `Leave room if more ${noun}s will join later — you can invite them from the tournament page.`}
               </p>
               <div className="mt-3 flex items-center gap-3">
                 <button
@@ -246,7 +278,7 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
                 >
                   +
                 </button>
-                {places !== null && (
+                {places !== null && !official && (
                   <button type="button" onClick={() => setPlaces(null)} className="text-xs text-mist underline">
                     Just the {noun}s I added
                   </button>
@@ -300,15 +332,34 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
           <>
             <h2 className="font-display text-2xl font-bold text-white">All set?</h2>
             <dl className="mt-5 divide-y divide-white/10 rounded-xl border border-white/10 text-sm">
-              <Row k="Name" v={name.trim() || `${me.nickname}'s ${format === "1v1" ? "singles" : "doubles"} tournament`} />
+              <Row
+                k="Name"
+                v={name.trim() || `${me?.nickname ?? "Cue Point"}'s ${format === "1v1" ? "singles" : "doubles"} tournament`}
+              />
               <Row k="Game" v={format === "1v1" ? "Singles (1 v 1)" : "Doubles (2 v 2)"} />
               <Row k={ppt === 1 ? "Players" : "Teams"} v={`${teams.length} added · ${size} places`} />
+              {official && (
+                <>
+                  <Row k="Entry" v={event.entryFee ? `LKR ${Number(event.entryFee).toLocaleString("en-LK")}` : "Free"} />
+                  <Row k="Prize pool" v={event.prizePool ? `LKR ${Number(event.prizePool).toLocaleString("en-LK")}` : "—"} />
+                </>
+              )}
               <Row k="How to play" v={formatLine(chosen)} />
               <Row k="Matches" v={`${describe(chosen, size).totalMatches} — at your own pace`} />
             </dl>
             <p className="mt-4 text-sm text-mist">
-              Everyone you added gets an invitation. When enough have accepted, press <strong className="text-white">Start</strong>{" "}
-              on the tournament page and the matches are made for you.
+              {official ? (
+                <>
+                  It goes up on the Tournaments page straight away and players sign themselves up. When enough have
+                  signed up, press <strong className="text-white">Start</strong> on the tournament page and the
+                  matches are made for you. Enter every result right there.
+                </>
+              ) : (
+                <>
+                  Everyone you added gets an invitation. When enough have accepted, press{" "}
+                  <strong className="text-white">Start</strong> on the tournament page and the matches are made for you.
+                </>
+              )}
             </p>
           </>
         )}
@@ -333,11 +384,11 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
               ← Back
             </button>
           ) : (
-            <Link href="/play" className="px-2 text-sm text-mist hover:text-white">
+            <Link href={official ? "/admin" : "/play"} className="px-2 text-sm text-mist hover:text-white">
               Cancel
             </Link>
           )}
-          {step < STEPS.length - 1 ? (
+          {step < steps.length - 1 ? (
             <PrimaryButton className="ml-auto px-8 py-3 text-base" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
               Next →
             </PrimaryButton>
@@ -349,6 +400,70 @@ export function NewTournament({ me }: { me: PickedPlayer }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+type EventDetails = {
+  summary: string;
+  entryFee: string;
+  prizePool: string;
+  startAt: string;
+  registrationDeadline: string;
+  rules: string;
+};
+
+const field =
+  "mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3.5 text-base text-white placeholder:text-mist/60 focus:border-[#a78bfa]/60 focus:outline-none";
+
+/** official tournaments: what players see before they sign up */
+function EventStep({
+  name,
+  setName,
+  event,
+  setEvent,
+}: {
+  name: string;
+  setName: (v: string) => void;
+  event: EventDetails;
+  setEvent: (fn: (e: EventDetails) => EventDetails) => void;
+}) {
+  const set = (k: keyof EventDetails) => (e: { target: { value: string } }) =>
+    setEvent((cur) => ({ ...cur, [k]: e.target.value }));
+  return (
+    <>
+      <h2 className="font-display text-2xl font-bold text-white">The event</h2>
+      <p className="mt-1 text-sm text-mist">Singles, 8-Ball. Players see all of this when they sign up.</p>
+      <label className="mt-5 block">
+        <span className="text-sm font-semibold text-white">Name</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Pitipana Masters" className={field} />
+      </label>
+      <label className="mt-4 block">
+        <span className="text-sm font-semibold text-white">One line about it (optional)</span>
+        <input value={event.summary} onChange={set("summary")} maxLength={200} placeholder="Our monthly singles knockout" className={field} />
+      </label>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <label className="block">
+          <span className="text-sm font-semibold text-white">Entry fee, LKR (empty = free)</span>
+          <input value={event.entryFee} onChange={set("entryFee")} inputMode="numeric" placeholder="1000" className={field} />
+        </label>
+        <label className="block">
+          <span className="text-sm font-semibold text-white">Prize pool, LKR (optional)</span>
+          <input value={event.prizePool} onChange={set("prizePool")} inputMode="numeric" placeholder="50000" className={field} />
+        </label>
+        <label className="block">
+          <span className="text-sm font-semibold text-white">Starts (optional)</span>
+          <input type="datetime-local" value={event.startAt} onChange={set("startAt")} className={field} />
+        </label>
+        <label className="block">
+          <span className="text-sm font-semibold text-white">Sign up by (optional)</span>
+          <input type="datetime-local" value={event.registrationDeadline} onChange={set("registrationDeadline")} className={field} />
+        </label>
+      </div>
+      <label className="mt-4 block">
+        <span className="text-sm font-semibold text-white">Rules (one per line)</span>
+        <textarea value={event.rules} onChange={set("rules")} rows={4} className={cn(field, "resize-none")} />
+      </label>
+    </>
   );
 }
 

@@ -14,6 +14,9 @@ export async function POST(
   return withActor(req, { write: true }, async (actor) => {
     const b = await readBody(req);
     switch (action) {
+      case "register":
+        await F.registerForOfficial(id, actor);
+        break;
       case "respond":
         await F.respondToTournament(id, actor, b.accept !== false);
         break;

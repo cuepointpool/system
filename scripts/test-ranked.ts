@@ -1,7 +1,7 @@
 /* Pure-logic tests for the Ranked leaderboard (no database needed).
    Run:  npm run test:ranked */
 import assert from "node:assert/strict";
-import { computeRanked, finishesFor, RANKED_POINTS, type BracketMatch } from "../lib/ecosystem/ranked";
+import { computeRanked, RANKED_POINTS, type Finish, type FinishedTournament } from "../lib/ecosystem/ranked";
 
 let n = 0;
 const t = (name: string, fn: () => void) => {
@@ -10,45 +10,47 @@ const t = (name: string, fn: () => void) => {
   console.log("  ok  " + name);
 };
 
-/** an 8-player bracket where the lower letter always wins: A champion, B runner-up … */
-function eight(id: string): BracketMatch[] {
-  const m = (round: number, a: string, b: string): BracketMatch => ({
-    tournamentId: id, round, aId: a, bId: b, winnerId: a < b ? a : b,
-  });
-  return [
-    m(1, "A", "H"), m(1, "D", "E"), m(1, "B", "G"), m(1, "C", "F"),
-    m(2, "A", "D"), m(2, "B", "C"),
-    m(3, "A", "B"),
-  ];
+/** an 8-player knockout where the lower letter always wins: A champion, B runner-up … */
+function eight(id: string, name: string, completedAt: string, champ = "A", runner = "B"): FinishedTournament {
+  const finishes = new Map<string, Finish>([
+    [champ, "champion"],
+    [runner, "runner_up"],
+    ["C", "semi_final"],
+    ["D", "semi_final"],
+    ["E", "quarter_final"],
+    ["F", "quarter_final"],
+    ["G", "quarter_final"],
+    ["H", "quarter_final"],
+  ]);
+  const g = (a: string, b: string, winner = a < b ? a : b) => ({ a, b, winner });
+  return {
+    id,
+    name,
+    completedAt,
+    finishes,
+    games: [
+      g("A", "H"), g("D", "E"), g("B", "G"), g("C", "F"),
+      g("A", "D"), g("B", "C"),
+      g("A", "B", champ),
+    ],
+  };
 }
 
-t("finishes by the round you went out in", () => {
-  const f = finishesFor({ id: "t1", name: "Cup", championId: "A", completedAt: "2026-10-01" }, eight("t1"));
-  assert.equal(f.get("A"), "champion");
-  assert.equal(f.get("B"), "runner_up");
-  assert.equal(f.get("C"), "semi_final");
-  assert.equal(f.get("D"), "semi_final");
-  for (const p of ["E", "F", "G", "H"]) assert.equal(f.get(p), "quarter_final");
+t("points for where each player finished", () => {
+  const rows = computeRanked([eight("t1", "Cup", "2026-10-01")]);
+  const pts = Object.fromEntries(rows.map((r) => [r.playerId, r.points]));
+  assert.equal(pts.A, RANKED_POINTS.champion);
+  assert.equal(pts.B, RANKED_POINTS.runnerUp);
+  assert.equal(pts.C, RANKED_POINTS.semiFinal);
+  assert.equal(pts.H, RANKED_POINTS.quarterFinal);
+  assert.equal(rows[0].playerId, "A");
 });
 
-t("a BYE in round 1 still counts the player's real exit", () => {
-  const ms: BracketMatch[] = [
-    { tournamentId: "t", round: 1, aId: "A", bId: null, winnerId: "A" }, // BYE
-    { tournamentId: "t", round: 1, aId: "B", bId: "C", winnerId: "B" },
-    { tournamentId: "t", round: 2, aId: "A", bId: "B", winnerId: "B" },
-  ];
-  const f = finishesFor({ id: "t", name: "x", championId: "B", completedAt: "x" }, ms);
-  assert.deepEqual([f.get("B"), f.get("A"), f.get("C")], ["champion", "runner_up", "semi_final"]);
-});
-
-t("points add up across tournaments; titles break ties", () => {
-  const rows = computeRanked(
-    [
-      { id: "t1", name: "October Cup", championId: "A", completedAt: "2026-10-01" },
-      { id: "t2", name: "November Cup", championId: "B", completedAt: "2026-11-01" },
-    ],
-    [...eight("t1"), ...eight("t2").map((m) => ({ ...m, winnerId: m.winnerId === "A" && m.round === 3 ? "B" : m.winnerId }))],
-  );
+t("points add up across tournaments; wins and losses come from the matches", () => {
+  const rows = computeRanked([
+    eight("t1", "October Cup", "2026-10-01"),
+    eight("t2", "November Cup", "2026-11-01", "B", "A"),
+  ]);
   const a = rows.find((r) => r.playerId === "A")!;
   const b = rows.find((r) => r.playerId === "B")!;
   assert.equal(a.points, RANKED_POINTS.champion + RANKED_POINTS.runnerUp);
@@ -57,16 +59,13 @@ t("points add up across tournaments; titles break ties", () => {
   assert.equal(b.tournaments, 2);
   assert.equal(rows.length, 8);
   assert.equal(a.results.length, 2);
-  // A and B level on points and titles, same best finish → match wins decide (A: 3+2, B: 2+3)
+  assert.equal(a.wins, 5);
+  assert.equal(a.losses, 1);
   assert.ok(rows.indexOf(a) < 2 && rows.indexOf(b) < 2);
 });
 
-t("no finished hosted tournament → empty board", () => {
-  assert.deepEqual(computeRanked([], []), []);
-  assert.deepEqual(
-    computeRanked([{ id: "t", name: "x", championId: null, completedAt: null }], eight("t")),
-    [],
-  );
+t("no finished official tournament → empty board", () => {
+  assert.deepEqual(computeRanked([]), []);
 });
 
 console.log(`\n${n} ranked tests passed`);

@@ -1,11 +1,12 @@
 /* ============================================================
    Ranked leaderboard — built ONLY from tournaments Cue Point hosts
-   (the house tournaments staff run from the console). It is empty
-   until the first one finishes; every finished tournament then
-   awards ranking points by how far each player got.
+   (official tournaments, run on the same engine as friend
+   tournaments). It is empty until the first one finishes; every
+   finished tournament then awards ranking points by how far each
+   player got.
 
-   Pure: callers pass in the finished tournaments and their bracket
-   matches. The in-house leaderboard (every registered player, every
+   Pure: callers pass in each finished tournament's finishes and
+   matches (friends/store officialResults). The in-house leaderboard (every registered player, every
    recorded match) lives in store.getLeaderboard and is untouched.
    ============================================================ */
 
@@ -42,19 +43,14 @@ const FINISH_POINTS: Record<Finish, number> = {
 /** lower = better, for "best finish" */
 const FINISH_ORDER: Finish[] = ["champion", "runner_up", "semi_final", "quarter_final", "round_of_16", "played"];
 
-export interface HostedTournament {
+/** one finished official tournament: where everyone finished, and its matches */
+export interface FinishedTournament {
   id: string;
   name: string;
-  championId: string | null;
-  completedAt: string | null;
-}
-
-export interface BracketMatch {
-  tournamentId: string;
-  round: number;
-  aId: string | null;
-  bId: string | null;
-  winnerId: string | null;
+  completedAt: string;
+  /** player id → finish */
+  finishes: Map<string, Finish>;
+  games: { a: string; b: string; winner: string }[];
 }
 
 export interface TournamentResult {
@@ -75,32 +71,8 @@ export interface RankedEntry {
   results: TournamentResult[];
 }
 
-/** how far each entrant got in one single-elimination bracket */
-export function finishesFor(t: HostedTournament, matches: BracketMatch[]): Map<string, Finish> {
-  const out = new Map<string, Finish>();
-  const ms = matches.filter((m) => m.tournamentId === t.id);
-  if (!ms.length) return out;
-  const rounds = Math.max(...ms.map((m) => m.round));
-  for (const m of ms) {
-    for (const p of [m.aId, m.bId]) if (p && !out.has(p)) out.set(p, "played");
-  }
-  // a played match: its loser went out in this round
-  for (const m of ms) {
-    if (!m.winnerId || !m.aId || !m.bId) continue;
-    const loser = m.winnerId === m.aId ? m.bId : m.aId;
-    const left = rounds - m.round + 1; // 1 = final, 2 = semis, …
-    out.set(
-      loser,
-      left === 1 ? "runner_up" : left === 2 ? "semi_final" : left === 3 ? "quarter_final" : left === 4 ? "round_of_16" : "played",
-    );
-  }
-  const champ = t.championId ?? ms.find((m) => m.round === rounds)?.winnerId ?? null;
-  if (champ) out.set(champ, "champion");
-  return out;
-}
-
-/** the ranked table across every finished hosted tournament, best first */
-export function computeRanked(tournaments: HostedTournament[], matches: BracketMatch[]): RankedEntry[] {
+/** the ranked table across every finished official tournament, best first */
+export function computeRanked(tournaments: FinishedTournament[]): RankedEntry[] {
   const byPlayer = new Map<string, RankedEntry>();
   const entry = (id: string) => {
     let e = byPlayer.get(id);
@@ -110,12 +82,10 @@ export function computeRanked(tournaments: HostedTournament[], matches: BracketM
     }
     return e;
   };
-  const done = [...tournaments]
-    .filter((t) => t.completedAt !== null || t.championId !== null)
-    .sort((a, b) => (a.completedAt ?? "").localeCompare(b.completedAt ?? ""));
+  const done = [...tournaments].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
 
   for (const t of done) {
-    for (const [pid, finish] of finishesFor(t, matches)) {
+    for (const [pid, finish] of t.finishes) {
       const e = entry(pid);
       const pts = FINISH_POINTS[finish];
       e.points += pts;
@@ -124,9 +94,9 @@ export function computeRanked(tournaments: HostedTournament[], matches: BracketM
       if (FINISH_ORDER.indexOf(finish) < FINISH_ORDER.indexOf(e.bestFinish)) e.bestFinish = finish;
       e.results.push({ tournamentId: t.id, tournamentName: t.name, finish, points: pts });
     }
-    for (const m of matches.filter((x) => x.tournamentId === t.id && x.winnerId && x.aId && x.bId)) {
-      entry(m.winnerId!).wins += 1;
-      entry(m.winnerId === m.aId ? m.bId! : m.aId!).losses += 1;
+    for (const g of t.games) {
+      entry(g.winner).wins += 1;
+      entry(g.winner === g.a ? g.b : g.a).losses += 1;
     }
   }
   return [...byPlayer.values()].sort(

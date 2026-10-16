@@ -276,7 +276,7 @@ export interface PlayerProfileView {
     tournamentId: string;
     name: string;
     slug: string;
-    status: TournamentStatus;
+    status: string;
     placement: string | null;
   }[];
   upcomingMatches: UpcomingMatchView[];

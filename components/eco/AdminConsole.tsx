@@ -4,8 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Tabs } from "./Primitives";
 import { DailyLogTab } from "./DailyLogTab";
-import { hostedRounds } from "@/lib/ecosystem/hosted";
-import { BEST_OF_OPTIONS, bestOfLabel, framesToWin } from "@/lib/friends/structure";
+import type { OfficialListItem } from "@/lib/friends/types";
 import { cn, formatDateShort, formatLKR, label12h, timeAgo } from "@/lib/utils";
 import {
   EXPENSE_CATEGORIES,
@@ -25,7 +24,6 @@ import type {
   MembershipPlan,
   Promotion,
   SkillLevel,
-  Tournament,
   UserRole,
 } from "@/lib/ecosystem/types";
 
@@ -157,7 +155,7 @@ export function AdminConsole() {
       <div className="mt-6 overflow-x-auto">
         <Tabs
           tabs={[
-            { value: "matches", label: "Record result" },
+            { value: "matches", label: "Record a match" },
             { value: "players", label: "Players" },
             { value: "tournaments", label: "Tournaments" },
             { value: "promotions", label: "Offers" },
@@ -397,11 +395,6 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
     headers,
     (d) => d.players as StaffPlayer[],
   );
-  const { data: tournaments } = useStaffData(
-    "/api/tournaments",
-    headers,
-    (d) => d.tournaments as (Tournament & { registeredCount: number })[],
-  );
   const { data: bundle, reload } = useStaffData(
     "/api/staff/matches",
     headers,
@@ -414,7 +407,6 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
     playerAId: "",
     playerBId: "",
     tableName: TABLES[0],
-    tournamentId: "",
     scoreA: 0,
     scoreB: 0,
   });
@@ -435,8 +427,7 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
     form.playerAId &&
     form.playerBId &&
     form.playerAId !== form.playerBId &&
-    winnerId &&
-    (form.type !== "tournament" || form.tournamentId);
+    winnerId;
 
   async function submit() {
     setBusy(true);
@@ -447,7 +438,6 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
         playerAId: form.playerAId,
         playerBId: form.playerBId,
         tableName: form.tableName,
-        tournamentId: form.type === "tournament" ? form.tournamentId : null,
         scoreA: form.scoreA,
         scoreB: form.scoreB,
         winnerId,
@@ -470,7 +460,11 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      <Panel title="New official result">
+      <Panel title="Record a ranked or casual match">
+        <p className="-mt-1 mb-4 text-[12px] text-mist">
+          Tournament matches are entered inside each tournament — open it from the{" "}
+          <strong>Tournaments</strong> tab.
+        </p>
         {list.length < 2 ? (
           <p className="text-[13px] text-mist">
             You need at least two players. Add them in the{" "}
@@ -480,7 +474,7 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
           <div className="space-y-4">
             <Field label="Match type">
               <div className="flex gap-2">
-                {(["ranked", "casual", "tournament"] as MatchType[]).map((t) => (
+                {(["ranked", "casual"] as MatchType[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setForm((f) => ({ ...f, type: t }))}
@@ -496,27 +490,6 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
                 ))}
               </div>
             </Field>
-
-            {form.type === "tournament" && (
-              <Field label="Tournament">
-                <select
-                  value={form.tournamentId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, tournamentId: e.target.value }))
-                  }
-                  className="input"
-                >
-                  <option value="">Select…</option>
-                  {(tournaments ?? [])
-                    .filter((t) => t.status !== "completed")
-                    .map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-            )}
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Player 1">
@@ -536,30 +509,6 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
                 />
               </Field>
             </div>
-
-            {form.type === "tournament" && (() => {
-              const t = (tournaments ?? []).find((x) => x.id === form.tournamentId);
-              const bm = t?.bracket.find(
-                (m) =>
-                  !m.winnerId &&
-                  ((m.aId === form.playerAId && m.bId === form.playerBId) ||
-                    (m.aId === form.playerBId && m.bId === form.playerAId)),
-              );
-              if (!t || !form.playerAId || !form.playerBId) return null;
-              if (!bm)
-                return (
-                  <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
-                    These two don&apos;t have an open match in {t.name}&apos;s bracket.
-                  </p>
-                );
-              const n = t.bestOf[bm.roundName] ?? 1;
-              return (
-                <p className="rounded-lg border border-teal/30 bg-teal/10 px-3 py-2 text-xs text-teal">
-                  {bm.roundName} · {bestOfLabel(n)}
-                  {n > 1 ? ` — first to ${framesToWin(n)} frames` : ""}
-                </p>
-              );
-            })()}
 
             <Field label="Score">
               <div className="flex items-center gap-3">
@@ -618,8 +567,8 @@ function MatchTab({ headers }: { headers: Record<string, string> }) {
                   ({form.type})
                 </p>
                 <p className="mt-1 text-[11px] text-mist">
-                  Updates matches, W/L, win %, ranking points &amp; positions,
-                  recent form, and any linked tournament bracket. Audited.
+                  Updates matches, W/L, win %, ranking points &amp; positions
+                  and recent form. Audited.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
@@ -1012,366 +961,68 @@ function LoyaltyAdjust({
 
 /* ================= Tournaments ================= */
 
+/* Official tournaments run on the same engine as friend tournaments: the
+   same four-step setup and every format, and results are entered on each
+   tournament's own page — staff run them from there. */
 function TournamentsTab({ headers }: { headers: Record<string, string> }) {
-  const { data: list, reload } = useStaffData(
+  const { data: list } = useStaffData(
     "/api/tournaments",
     headers,
-    (d) =>
-      d.tournaments as (Tournament & {
-        registeredCount: number;
-        spotsLeft: number;
-      })[],
+    (d) => d.tournaments as OfficialListItem[],
   );
-  const [form, setForm] = useState({
-    name: "",
-    summary: "",
-    startAt: "",
-    registrationDeadline: "",
-    entryFee: "1000",
-    prizePool: "50000",
-    maxPlayers: "8",
-    format: "single_elim",
-    rules: "8-ball, World Rules. Race to 7 (final race to 9).\nWinner breaks. Standard 3-foul rule.\nReport 15 minutes before your match.",
-  });
-  const [bestOf, setBestOf] = useState<Record<string, number>>({});
-  const [cancelling, setCancelling] = useState<{ slug: string; code: string; typed: string } | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function create() {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const res = await jpost("/api/staff/tournaments", headers, {
-        ...form,
-        bestOf,
-        entryFee: Number(form.entryFee),
-        prizePool: Number(form.prizePool),
-        maxPlayers: Number(form.maxPlayers),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Failed");
-      setMsg({ ok: true, text: `Created ${d.tournament.name}` });
-      setForm((f) => ({ ...f, name: "", summary: "" }));
-      reload();
-    } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : "Failed" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function act(slug: string, body: Record<string, unknown>) {
-    const res = await jpatch("/api/staff/tournaments", headers, { slug, ...body });
-    const d = await res.json();
-    if (!res.ok) setMsg({ ok: false, text: d.error });
-    reload();
-  }
-
+  const groups: [string, OfficialListItem[]][] = [
+    ["Playing now", (list ?? []).filter((t) => t.status === "in_progress")],
+    ["Sign-up", (list ?? []).filter((t) => t.status === "registration_open")],
+    ["Finished", (list ?? []).filter((t) => t.status === "completed")],
+  ];
   return (
-    <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
-      <Panel title="Create a tournament">
-        <div className="space-y-3">
-          <Field label="Name">
-            <input
-              className="input"
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              placeholder="Pitipana Masters"
-            />
-          </Field>
-          <Field label="Summary">
-            <input
-              className="input"
-              value={form.summary}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, summary: e.target.value }))
-              }
-              placeholder="One line about the event"
-            />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Starts (optional)">
-              <input
-                type="datetime-local"
-                className="input"
-                value={form.startAt}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, startAt: e.target.value }))
-                }
-              />
-            </Field>
-            <Field label="Registration deadline (optional)">
-              <input
-                type="datetime-local"
-                className="input"
-                value={form.registrationDeadline}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    registrationDeadline: e.target.value,
-                  }))
-                }
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="Entry fee">
-              <input
-                className="input"
-                value={form.entryFee}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, entryFee: e.target.value }))
-                }
-                inputMode="numeric"
-              />
-            </Field>
-            <Field label="Prize pool">
-              <input
-                className="input"
-                value={form.prizePool}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, prizePool: e.target.value }))
-                }
-                inputMode="numeric"
-              />
-            </Field>
-            <Field label="Max players">
-              <select
-                className="input"
-                value={form.maxPlayers}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, maxPlayers: e.target.value }))
-                }
-              >
-                {["4", "8", "16"].map((n) => (
-                  <option key={n}>{n}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <Field label="Match length per round">
-            <BestOfRows
-              rounds={hostedRounds(Number(form.maxPlayers))}
-              value={bestOf}
-              onChange={setBestOf}
-            />
-          </Field>
-          <Field label="Rules (one per line)">
-            <textarea
-              className="input resize-none"
-              rows={3}
-              value={form.rules}
-              onChange={(e) => setForm((f) => ({ ...f, rules: e.target.value }))}
-            />
-          </Field>
-          <Msg msg={msg} />
-          <button
-            onClick={create}
-            disabled={busy || !form.name}
-            className="btn-primary w-full py-3 text-sm disabled:opacity-40"
-          >
-            {busy ? "…" : "Create tournament"}
-          </button>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 rounded-2xl border border-teal/30 bg-teal/[0.06] p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-display text-lg font-semibold text-white">Run an official tournament</p>
+          <p className="mt-1 max-w-xl text-sm text-mist">
+            Same steps and formats as a friends tournament — knockout, two lives, league or groups, match
+            length per round — plus entry fee, prize pool and rules. Players sign up on its page, and you
+            start it and enter every result right there.
+          </p>
         </div>
-      </Panel>
+        <Link href="/admin/tournaments/new" className="btn-primary shrink-0 px-6 py-3 text-sm">
+          ＋ Create tournament
+        </Link>
+      </div>
 
-      <Panel title={`Tournaments (${list?.length ?? 0})`}>
-        <div className="space-y-3">
-          {(list ?? []).map((t) => (
-            <div
-              key={t.id}
-              className="rounded-xl border border-white/10 bg-white/[0.02] p-4"
-            >
-              <div className="flex items-center justify-between">
+      {list && list.length === 0 && <p className="text-sm text-mist">No official tournaments yet.</p>}
+      {groups
+        .filter(([, ts]) => ts.length)
+        .map(([title, ts]) => (
+          <Panel key={title} title={`${title} (${ts.length})`}>
+            <div className="space-y-3">
+              {ts.map((t) => (
                 <Link
+                  key={t.id}
                   href={`/tournaments/${t.slug}`}
-                  className="font-semibold text-white hover:text-teal"
+                  className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-4 transition-colors hover:border-teal/40 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  {t.name}
-                </Link>
-                <span className="text-[11px] uppercase tracking-wide text-mist">
-                  {t.status.replace(/_/g, " ")}
-                </span>
-              </div>
-              <div className="mt-1 text-[12px] text-mist">
-                {t.registeredCount}/{t.maxPlayers} players ·{" "}
-                {t.bracket.length ? "bracket generated" : "no bracket"} ·{" "}
-                {t.startAt ? formatDateShort(t.startAt) : "no date set"}
-              </div>
-              <TournamentLengths
-                t={t}
-                onSave={(value) => act(t.slug, { action: "best-of", bestOf: value })}
-              />
-              <div className="mt-3 flex flex-wrap gap-2">
-                {t.status === "registration_open" && (
-                  <button
-                    onClick={() =>
-                      act(t.slug, {
-                        action: "set-status",
-                        status: "registration_closed",
-                      })
-                    }
-                    className="btn-ghost !px-3 !py-1.5 text-xs"
-                  >
-                    Close registration
-                  </button>
-                )}
-                {!t.bracket.length && t.registeredCount >= 4 && (
-                  <button
-                    onClick={() => act(t.slug, { action: "generate-bracket" })}
-                    className="btn-primary !px-3 !py-1.5 text-xs"
-                  >
-                    Generate bracket
-                  </button>
-                )}
-                {t.status !== "completed" && t.status !== "cancelled" && cancelling?.slug !== t.slug && (
-                  <button
-                    onClick={async () => {
-                      const res = await jpatch("/api/staff/tournaments", headers, { slug: t.slug, action: "cancel-code" });
-                      const d = await res.json();
-                      if (res.ok) setCancelling({ slug: t.slug, code: d.code, typed: "" });
-                      else setMsg({ ok: false, text: d.error });
-                    }}
-                    className="btn-ghost !px-3 !py-1.5 text-xs text-rose-300"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-              {cancelling?.slug === t.slug && (
-                <div className="mt-3 rounded-lg border border-rose-400/30 bg-rose-400/10 p-3">
-                  <p className="text-xs text-rose-100">
-                    Cancel {t.name}? Type this code to confirm:{" "}
-                    <strong className="font-display text-base tracking-[0.25em] text-white">{cancelling.code}</strong>
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <input
-                      value={cancelling.typed}
-                      onChange={(e) =>
-                        setCancelling({ ...cancelling, typed: e.target.value.replace(/\D/g, "").slice(0, 6) })
-                      }
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="Code"
-                      className="input !w-32 text-center tracking-[0.2em]"
-                    />
-                    <button
-                      disabled={cancelling.typed !== cancelling.code}
-                      onClick={async () => {
-                        await act(t.slug, { action: "set-status", status: "cancelled", code: cancelling.typed });
-                        setCancelling(null);
-                      }}
-                      className="btn-ghost !px-3 !py-1.5 text-xs text-rose-300 disabled:opacity-40"
-                    >
-                      Yes, cancel it
-                    </button>
-                    <button onClick={() => setCancelling(null)} className="btn-primary !px-3 !py-1.5 text-xs">
-                      Keep it
-                    </button>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-white">{t.name}</p>
+                    <p className="mt-0.5 text-[12px] text-mist">
+                      {t.formatLine} · {t.registered}/{t.capacity} players
+                      {t.startAt ? ` · ${formatDateShort(t.startAt)}` : ""}
+                      {t.champion ? ` · 🏆 ${t.champion.nickname}` : ""}
+                    </p>
                   </div>
-                </div>
-              )}
+                  <span className="shrink-0 text-sm font-semibold text-teal">
+                    {t.status === "in_progress"
+                      ? "Enter results →"
+                      : t.status === "registration_open"
+                        ? "Players & start →"
+                        : "Results →"}
+                  </span>
+                </Link>
+              ))}
             </div>
-          ))}
-          {list && list.length === 0 && (
-            <p className="text-xs text-mist">No tournaments yet.</p>
-          )}
-        </div>
-        <p className="mt-4 text-[11px] text-mist/70">
-          Record bracket results in the <strong>Record result</strong> tab
-          (type: tournament) — winners advance automatically, and the champion is
-          set when the final is entered.
-        </p>
-      </Panel>
-    </div>
-  );
-}
-
-/** one row per round: Single frame / Bo3 / Bo5 / Bo7 / Bo9 */
-function BestOfRows({
-  rounds,
-  value,
-  onChange,
-}: {
-  rounds: string[];
-  value: Record<string, number>;
-  onChange: (v: Record<string, number>) => void;
-}) {
-  return (
-    <div className="space-y-1.5 rounded-lg border border-white/10 bg-white/[0.02] p-3">
-      {rounds.map((r) => (
-        <div key={r} className="flex flex-wrap items-center gap-1.5">
-          <span className="w-28 shrink-0 text-xs text-white">{r}</span>
-          {BEST_OF_OPTIONS.map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => onChange({ ...value, [r]: n })}
-              title={bestOfLabel(n)}
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
-                (value[r] ?? 1) === n
-                  ? "border-teal bg-teal/15 text-white"
-                  : "border-white/10 text-mist hover:text-white",
-              )}
-            >
-              {n === 1 ? "1 frame" : `Bo${n}`}
-            </button>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TournamentLengths({
-  t,
-  onSave,
-}: {
-  t: Tournament;
-  onSave: (v: Record<string, number>) => Promise<void> | void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<Record<string, number>>(t.bestOf);
-  const size = t.bracket.length ? t.bracket.filter((m) => m.round === 1).length * 2 : t.maxPlayers;
-  const rounds = hostedRounds(size);
-  return (
-    <div className="mt-2 text-[12px] text-mist">
-      {!editing ? (
-        <span>
-          {rounds.map((r) => `${r}: ${(t.bestOf[r] ?? 1) === 1 ? "1 frame" : `Bo${t.bestOf[r]}`}`).join(" · ")}{" "}
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(t.bestOf);
-              setEditing(true);
-            }}
-            className="ml-1 text-teal hover:underline"
-          >
-            Edit
-          </button>
-        </span>
-      ) : (
-        <div className="mt-1 space-y-2">
-          <BestOfRows rounds={rounds} value={draft} onChange={setDraft} />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={async () => {
-                await onSave(draft);
-                setEditing(false);
-              }}
-              className="btn-primary !px-3 !py-1.5 text-xs"
-            >
-              Save
-            </button>
-            <button type="button" onClick={() => setEditing(false)} className="btn-ghost !px-3 !py-1.5 text-xs">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+          </Panel>
+        ))}
     </div>
   );
 }

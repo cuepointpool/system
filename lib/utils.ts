@@ -65,15 +65,18 @@ export function formatDateShort(iso: string): string {
   });
 }
 
+/** "Sat 18 Oct · 7:00 pm" in Sri Lanka time, so the server and the browser agree */
 export function formatDayTime(iso: string): string {
   const d = new Date(iso);
+  const timeZone = "Asia/Colombo";
   return d.toLocaleDateString("en-GB", {
     weekday: "short",
     day: "numeric",
     month: "short",
+    timeZone,
   }) +
     " · " +
-    d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true });
+    d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true, timeZone });
 }
 
 export function formatTimeOnly(iso: string): string {

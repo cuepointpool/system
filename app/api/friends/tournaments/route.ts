@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { json, readBody, str, withActor } from "@/lib/friends/http";
-import { createTournament } from "@/lib/friends/store";
+import { createTournament, officialSlugOf } from "@/lib/friends/store";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
       seeding: b.seeding,
       teams,
       settings: b.settings,
+      official: b.official && typeof b.official === "object" ? (b.official as Record<string, unknown>) : null,
     });
-    return json({ id }, 201);
+    return json({ id, slug: await officialSlugOf(id) }, 201);
   });
 }

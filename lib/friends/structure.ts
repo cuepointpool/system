@@ -795,3 +795,16 @@ function simplify<T>(games: PlanGame<T>[]): PlanGame<T>[] {
   }
   return out;
 }
+
+/** one line describing how a tournament is played */
+export function formatLine(s: TournamentSettings): string {
+  const parts: string[] = [s.kind === "double_elim" ? "Two lives" : KIND_LABEL[s.kind]];
+  if (s.kind === "league") parts.push(FINISH_LABEL[s.finish]);
+  if (s.kind === "groups") parts.push(`${s.groups} groups`, `top ${s.advance} of each to the final rounds`);
+  if ((s.kind === "league" || s.kind === "groups") && s.legs === 2) parts.push("play each other twice");
+  if (s.thirdPlace && (s.kind === "knockout" || (s.kind === "league" && s.finish !== "table") || (s.kind === "groups" && s.groupFinish === "knockout")))
+    parts.push("3rd-place match");
+  const lengths = Object.entries(s.bestOf).filter(([, n]) => n > 1);
+  if (lengths.length) parts.push(lengths.map(([round, n]) => `${round} best of ${n}`).join(", "));
+  return parts.join(" · ");
+}

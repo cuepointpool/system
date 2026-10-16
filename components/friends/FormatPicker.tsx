@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
+export { formatLine } from "@/lib/friends/structure";
 import { cn } from "@/lib/utils";
 import {
   BEST_OF_OPTIONS,
-  FINISH_LABEL,
-  KIND_LABEL,
   LIMITS,
   bestOfLabel,
   bestOfSlots,
@@ -276,18 +275,6 @@ function optionsLine(s: TournamentSettings): string {
 }
 
 /** "League · Final: 1st v 2nd · 3rd-place match" — one plain line for headers */
-export function formatLine(s: TournamentSettings): string {
-  const parts: string[] = [s.kind === "double_elim" ? "Two lives" : KIND_LABEL[s.kind]];
-  if (s.kind === "league") parts.push(FINISH_LABEL[s.finish]);
-  if (s.kind === "groups") parts.push(`${s.groups} groups`, `top ${s.advance} of each to the final rounds`);
-  if ((s.kind === "league" || s.kind === "groups") && s.legs === 2) parts.push("play each other twice");
-  if (s.thirdPlace && (s.kind === "knockout" || (s.kind === "league" && s.finish !== "table") || (s.kind === "groups" && s.groupFinish === "knockout")))
-    parts.push("3rd-place match");
-  const lengths = Object.entries(s.bestOf).filter(([, n]) => n > 1);
-  if (lengths.length) parts.push(lengths.map(([round, n]) => `${round} best of ${n}`).join(", "));
-  return parts.join(" · ");
-}
-
 /** best of 1 / 3 / 5 / 7 / 9 — chosen per round */
 function MatchLength({
   value,

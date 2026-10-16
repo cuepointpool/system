@@ -125,6 +125,23 @@ export interface TournamentViewer {
   canLeave: boolean;
   /** organizer: may change the format while registration is open */
   canEditFormat: boolean;
+  /** official tournament: this signed-in player can sign up now */
+  canRegister: boolean;
+  /** nobody is signed in (official tournaments are public) */
+  signedOut: boolean;
+}
+
+/** the event details of a tournament Cue Point hosts */
+export interface OfficialInfo {
+  slug: string;
+  summary: string | null;
+  entryFee: number | null;
+  prizePool: number | null;
+  rules: string[];
+  startAt: string | null;
+  registrationDeadline: string | null;
+  /** sign-up is closed: the deadline passed or every place is taken */
+  signupClosed: boolean;
 }
 
 export interface BracketRound {
@@ -176,6 +193,8 @@ export interface TournamentView {
   seeding: "random" | "ranking";
   status: TournamentStatus;
   organizer: PlayerRef;
+  /** hosted by Cue Point — null for a friends tournament */
+  official: OfficialInfo | null;
   teams: TeamView[];
   /** teams that have every seat filled by an accepted player */
   teamsComplete: number;
@@ -236,6 +255,27 @@ export interface TournamentListItem {
   nextGameId: string | null;
   createdAt: string;
   version: number;
+}
+
+/** a tournament Cue Point hosts, as listed on /tournaments */
+export interface OfficialListItem {
+  id: string;
+  slug: string;
+  name: string;
+  summary: string | null;
+  kind: TournamentKind;
+  /** "Knockout", "League · top 4 play-offs" … */
+  formatLine: string;
+  status: TournamentStatus;
+  capacity: number;
+  registered: number;
+  entryFee: number | null;
+  prizePool: number | null;
+  startAt: string | null;
+  registrationDeadline: string | null;
+  signupClosed: boolean;
+  champion: PlayerRef | null;
+  createdAt: string;
 }
 
 export interface NotificationItem {

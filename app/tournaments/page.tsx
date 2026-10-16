@@ -3,11 +3,7 @@ import { PageHero } from "@/components/eco/Primitives";
 import { BACKDROPS } from "@/lib/gallery";
 import { TournamentCard } from "@/components/eco/TournamentCard";
 import { MagneticButton } from "@/components/MagneticButton";
-import {
-  derivedTournamentStatus,
-  getTournaments,
-  tournamentSpotsLeft,
-} from "@/lib/ecosystem/store";
+import { listOfficialTournaments } from "@/lib/friends/store";
 
 export const dynamic = "force-dynamic";
 
@@ -15,21 +11,14 @@ export const metadata: Metadata = {
   alternates: { canonical: "/tournaments" },
   title: "Tournaments",
   description:
-    "Cue Point tournaments — knockouts, leagues and the Pitipana Masters. Register with your Cue Point account.",
+    "Cue Point pool tournaments in Pitipana, Homagama — knockouts, leagues and group stages. Sign up with your Cue Point account.",
 };
 
 export default async function TournamentsPage() {
-  const list = (await getTournaments()).map((t) => ({
-    t: { ...t, status: derivedTournamentStatus(t) },
-    registeredCount: t.registrations.filter((r) => r.playerId).length,
-    spotsLeft: tournamentSpotsLeft(t),
-  }));
-
-  const open = list.filter((x) => x.t.status === "registration_open");
-  const liveOrSoon = list.filter((x) =>
-    ["live", "registration_closed", "upcoming"].includes(x.t.status),
-  );
-  const done = list.filter((x) => x.t.status === "completed");
+  const list = await listOfficialTournaments();
+  const open = list.filter((t) => t.status === "registration_open");
+  const live = list.filter((t) => t.status === "in_progress");
+  const done = list.filter((t) => t.status === "completed");
 
   return (
     <>
@@ -42,7 +31,7 @@ export default async function TournamentsPage() {
             Compete for the <span className="text-teal-gradient">title</span>
           </>
         }
-        intro="Seeded knockouts, cash prize pools and a live bracket board. Register from your Cue Point profile — one entry per player."
+        intro="Knockouts, leagues and group stages, with prize pools and live results. Sign up with your Cue Point account — one entry per player."
         actions={
           <MagneticButton href="/rankings" variant="ghost">
             Check the rankings
@@ -56,29 +45,28 @@ export default async function TournamentsPage() {
               No tournaments yet
             </p>
             <p className="mt-2 text-sm text-mist">
-              Cue Point staff create tournaments from the operations console.
-              Check back soon.
+              Cue Point announces its tournaments here. Check back soon.
             </p>
           </div>
         )}
-        {open.length > 0 && (
-          <Group label="Open for registration">
-            {open.map((x, i) => (
-              <TournamentCard key={x.t.id} {...x} delay={i * 0.05} />
+        {live.length > 0 && (
+          <Group label="Playing now">
+            {live.map((t, i) => (
+              <TournamentCard key={t.id} t={t} delay={i * 0.05} />
             ))}
           </Group>
         )}
-        {liveOrSoon.length > 0 && (
-          <Group label="Live & upcoming">
-            {liveOrSoon.map((x, i) => (
-              <TournamentCard key={x.t.id} {...x} delay={i * 0.05} />
+        {open.length > 0 && (
+          <Group label="Coming up — sign up">
+            {open.map((t, i) => (
+              <TournamentCard key={t.id} t={t} delay={i * 0.05} />
             ))}
           </Group>
         )}
         {done.length > 0 && (
-          <Group label="Completed">
-            {done.map((x, i) => (
-              <TournamentCard key={x.t.id} {...x} delay={i * 0.05} />
+          <Group label="Finished">
+            {done.map((t, i) => (
+              <TournamentCard key={t.id} t={t} delay={i * 0.05} />
             ))}
           </Group>
         )}

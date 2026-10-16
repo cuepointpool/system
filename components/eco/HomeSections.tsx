@@ -3,15 +3,10 @@ import { BACKDROPS } from "@/lib/gallery";
 import Link from "next/link";
 import { Reveal } from "@/components/Reveal";
 import { PlayerAvatar } from "./Primitives";
-import {
-  derivedTournamentStatus,
-  getLeaderboard,
-  getPromotions,
-  getTournaments,
-  tournamentSpotsLeft,
-} from "@/lib/ecosystem/store";
-import type { Tournament, TournamentStatus } from "@/lib/ecosystem/types";
-import { formatDateShort } from "@/lib/utils";
+import { getLeaderboard, getPromotions } from "@/lib/ecosystem/store";
+import { listOfficialTournaments } from "@/lib/friends/store";
+import type { OfficialListItem } from "@/lib/friends/types";
+import { formatDateShort, formatLKR } from "@/lib/utils";
 import { SectionKicker } from "@/components/BrandMark";
 
 const MEDAL: Record<number, string> = {
@@ -20,19 +15,11 @@ const MEDAL: Record<number, string> = {
   3: "bg-[#cd7f4d] text-navy-950",
 };
 
-function statusLabel(s: TournamentStatus) {
-  switch (s) {
-    case "registration_open":
-      return "Registration open";
-    case "live":
-      return "Live now";
-    case "completed":
-      return "Completed";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Upcoming";
-  }
+function statusLabel(t: OfficialListItem) {
+  if (t.status === "registration_open") return t.signupClosed ? "Sign-up closed" : "Sign-up open";
+  if (t.status === "in_progress") return "Playing now";
+  if (t.status === "completed") return "Finished";
+  return "Cancelled";
 }
 
 function monthDay(iso: string) {
@@ -47,16 +34,15 @@ function monthDay(iso: string) {
 export async function HomeScene() {
   const [leaderboard, allTournaments] = await Promise.all([
     getLeaderboard("all_time"),
-    getTournaments(),
+    listOfficialTournaments(),
   ]);
   const top = leaderboard.slice(0, 5);
-  const tournaments = allTournaments
-    .map((t) => ({ ...t, status: derivedTournamentStatus(t) }))
-    .sort((a, b) => (a.startAt ? +new Date(a.startAt) : Infinity) - (b.startAt ? +new Date(b.startAt) : Infinity));
+  const tournaments = [...allTournaments].sort(
+    (a, b) => (a.startAt ? +new Date(a.startAt) : Infinity) - (b.startAt ? +new Date(b.startAt) : Infinity),
+  );
   const featured =
+    tournaments.find((t) => t.status === "in_progress") ??
     tournaments.find((t) => t.status === "registration_open") ??
-    tournaments.find((t) => t.status === "live") ??
-    tournaments.find((t) => t.status === "upcoming") ??
     tournaments[0];
   const more = tournaments.filter((t) => t.id !== featured?.id).slice(0, 3);
 
@@ -227,41 +213,35 @@ export async function HomeScene() {
   );
 }
 
-function FeaturedTournament({
-  t,
-}: {
-  t: Tournament & { status: TournamentStatus };
-}) {
-  const spots = tournamentSpotsLeft(t);
+function FeaturedTournament({ t }: { t: OfficialListItem }) {
+  const spots = Math.max(0, t.capacity - t.registered);
   return (
     <div className="mt-5">
       <span className="text-xs font-semibold uppercase tracking-[0.14em] text-teal">
-        {statusLabel(t.status)}
+        {statusLabel(t)}
       </span>
       <h4 className="mt-1.5 font-display text-2xl font-bold leading-tight text-white">
         {t.name}
       </h4>
       <p className="mt-2 text-[15px] text-white/85">
-        {t.startAt ? formatDateShort(t.startAt) : "Date to be announced"} · {t.venue}
+        {t.startAt ? formatDateShort(t.startAt) : "Date to be announced"} · {t.formatLine}
       </p>
-
-      {t.rules.length > 0 && (
-        <ul className="mt-3 list-disc space-y-1 pl-5 text-[15px] text-white/85 marker:text-teal">
-          {t.rules.slice(0, 4).map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      )}
+      {t.summary && <p className="mt-2 text-[15px] text-white/85">{t.summary}</p>}
+      <p className="mt-2 text-[15px] text-white/85">
+        {t.prizePool ? `Prize pool ${formatLKR(t.prizePool)} · ` : ""}
+        {t.entryFee ? `Entry ${formatLKR(t.entryFee)}` : "Free entry"}
+        {t.champion ? ` · Won by ${t.champion.nickname}` : ""}
+      </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-4">
         <Link
           href={`/tournaments/${t.slug}`}
           className="inline-flex items-center rounded-full bg-white px-6 py-3 text-[12px] font-bold uppercase tracking-[0.08em] text-navy-950 transition-colors duration-200 hover:bg-gold"
         >
-          {t.status === "registration_open" ? "Register now" : "View tournament"}
+          {t.status === "registration_open" && !t.signupClosed ? "Sign up" : "View tournament"}
         </Link>
-        {t.status === "registration_open" && spots > 0 && (
-          <span className="text-sm text-mist">{spots} spots left</span>
+        {t.status === "registration_open" && !t.signupClosed && spots > 0 && (
+          <span className="text-sm text-mist">{spots} places left</span>
         )}
       </div>
     </div>

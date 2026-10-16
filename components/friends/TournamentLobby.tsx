@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, formatDayTime, formatLKR } from "@/lib/utils";
 import { MIN_TEAMS_TO_START } from "@/lib/friends/formats";
 import { bestOfLabel, describe, framesToWin, winningScores, type TournamentSettings } from "@/lib/friends/structure";
 import type { GameView, PendingTie, TeamView, TournamentSection, TournamentView } from "@/lib/friends/types";
@@ -58,8 +58,8 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
 
   // being on this page means you've seen its news — clear those from the bell
   useEffect(() => {
-    void apiPost("/api/friends/notifications", { href: `/play/tournaments/${t.id}` });
-  }, [t.id, t.version]);
+    if (meId) void apiPost("/api/friends/notifications", { href: `/play/tournaments/${t.id}` });
+  }, [t.id, t.version, meId]);
 
   async function act(action: string, body: Record<string, unknown> = {}) {
     setBusy(true);
@@ -75,11 +75,12 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
     return r.ok;
   }
 
+  const home = t.official ? "/tournaments" : "/play";
   if (gone) {
     return (
       <Notice tone="warn">
         This tournament is no longer available to you.{" "}
-        <Link href="/play" className="underline">Back to Play</Link>
+        <Link href={home} className="underline">Go back</Link>
       </Notice>
     );
   }
@@ -142,18 +143,26 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
         <Card>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[#c4b5fd]">{statusWords(t)}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#c4b5fd]">
+                {t.official ? "Cue Point tournament · " : ""}
+                {statusWords(t)}
+              </p>
               <h1 className="mt-1 font-display text-2xl font-bold text-white sm:text-3xl">{t.name}</h1>
               <p className="mt-1 text-sm text-mist">
                 {ppt === 1 ? "Singles" : "Doubles"} · {formatLine(t.settings)}
               </p>
-              <p className="mt-1 text-xs text-mist">
-                Organized by {t.organizer.nickname}
-                {v.isOrganizer ? " (you)" : ""}
-              </p>
+              {t.official ? (
+                t.official.summary && <p className="mt-2 max-w-2xl text-sm text-white/90">{t.official.summary}</p>
+              ) : (
+                <p className="mt-1 text-xs text-mist">
+                  Organized by {t.organizer.nickname}
+                  {v.isOrganizer ? " (you)" : ""}
+                </p>
+              )}
             </div>
             <LiveDot />
           </div>
+          {t.official && <OfficialFacts t={t} />}
           {t.guests > 0 && (
             <p className="mt-3 text-xs text-mist">
               Matches with a guest (no Cue Point account) are just for fun — they earn no points.
@@ -170,7 +179,7 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
           onAct={act}
           onDone={refetch}
           onGo={setTab}
-          onLeave={async () => (await act("respond", { accept: false })) && router.push("/play")}
+          onLeave={async () => (await act("respond", { accept: false })) && router.push(home)}
         />
 
         {confirm && (
@@ -299,17 +308,20 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
         )}
 
         <div className="flex flex-wrap items-center gap-4 border-t border-white/10 pt-5">
-          <Link href="/play" className="text-sm text-mist hover:text-white">
-            ← Back to Play
+          <Link href={home} className="text-sm text-mist hover:text-white">
+            {t.official ? "← All tournaments" : "← Back to Play"}
           </Link>
           {open && v.canLeave && !v.isOrganizer && !v.invited && (
             <button
               type="button"
               disabled={busy}
-              onClick={async () => (await act("respond", { accept: false })) && router.push("/play")}
+              onClick={async () => {
+                if (t.official) await act("respond", { accept: false });
+                else if (await act("respond", { accept: false })) router.push(home);
+              }}
               className="text-sm text-mist hover:text-red-300"
             >
-              Leave this tournament
+              {t.official ? "Withdraw my entry" : "Leave this tournament"}
             </button>
           )}
           {v.canCancel && !cancel && (
@@ -330,6 +342,46 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
         </div>
       </div>
     </TablesContext.Provider>
+  );
+}
+
+/* the event details of a tournament Cue Point hosts */
+function OfficialFacts({ t }: { t: TournamentView }) {
+  const o = t.official!;
+  const [rules, setRules] = useState(false);
+  const facts: [string, string][] = [
+    ["Starts", o.startAt ? formatDayTime(o.startAt) : "Date to be announced"],
+    ["Prize pool", o.prizePool ? formatLKR(o.prizePool) : "—"],
+    ["Entry", o.entryFee ? formatLKR(o.entryFee) : "Free"],
+    ["Players", `${t.teams.length} / ${t.capacityTeams}`],
+  ];
+  if (o.registrationDeadline && t.status === "registration_open")
+    facts.push(["Sign up by", formatDayTime(o.registrationDeadline)]);
+  return (
+    <div className="mt-4 border-t border-white/10 pt-4">
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {facts.map(([k, val]) => (
+          <div key={k}>
+            <dt className="text-[10px] uppercase tracking-wider text-mist/60">{k}</dt>
+            <dd className={cn("mt-0.5 text-sm font-semibold", k === "Prize pool" ? "text-gold" : "text-white")}>{val}</dd>
+          </div>
+        ))}
+      </dl>
+      {o.rules.length > 0 && (
+        <div className="mt-3">
+          <button type="button" onClick={() => setRules((x) => !x)} className="text-sm text-[#c4b5fd] underline">
+            {rules ? "Hide the rules" : "Read the rules"}
+          </button>
+          {rules && (
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-mist">
+              {o.rules.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -411,6 +463,66 @@ function NextStep({
     );
   }
 
+  if (t.status === "registration_open" && t.official && !v.canStart) {
+    const o = t.official;
+    const left = t.capacityTeams - t.teams.length;
+    if (v.isMember)
+      return box(
+        <>
+          {heading("You're signed up!")}
+          <p className="mt-1 text-sm text-mist">
+            {o.startAt ? `It starts ${formatDayTime(o.startAt)}. ` : "We'll let you know when it starts. "}
+            Your matches appear here once Cue Point starts the tournament.
+          </p>
+          <div className="mt-3 max-w-sm">
+            <CountBar label="Players" have={t.teams.length} need={t.capacityTeams} />
+          </div>
+        </>,
+        "ok",
+      );
+    if (v.signedOut)
+      return box(
+        <>
+          {heading(o.signupClosed ? "Sign-up is closed" : "Want to play?")}
+          <p className="mt-1 text-sm text-mist">
+            {o.signupClosed
+              ? "Every place is taken or the deadline has passed."
+              : `${left} place${left === 1 ? "" : "s"} left. Sign in to your Cue Point account to sign up — joining is free.`}
+          </p>
+          {!o.signupClosed && (
+            <Link
+              href={`/account?next=${encodeURIComponent(`/tournaments/${o.slug}`)}`}
+              className="mt-4 inline-flex rounded-full bg-[linear-gradient(120deg,#a78bfa,#ec4899)] px-8 py-3 text-base font-semibold text-white"
+            >
+              Sign in to sign up
+            </Link>
+          )}
+        </>,
+      );
+    if (v.canRegister)
+      return box(
+        <>
+          {heading("Want to play?")}
+          <p className="mt-1 text-sm text-mist">
+            {left} place{left === 1 ? "" : "s"} left
+            {o.entryFee ? ` · entry ${formatLKR(o.entryFee)}, paid at the counter` : " · free entry"}.
+          </p>
+          <PrimaryButton className="mt-4 px-10 py-3.5 text-base" disabled={busy} onClick={() => onAct("register")}>
+            Sign me up
+          </PrimaryButton>
+        </>,
+      );
+    return box(
+      <>
+        {heading(o.signupClosed ? "Sign-up is closed" : "Sign-up is open")}
+        <p className="mt-1 text-sm text-mist">
+          {t.teams.length} of {t.capacityTeams} players signed up.
+        </p>
+      </>,
+      "plain",
+    );
+  }
+
   if (t.status === "registration_open") {
     if (v.invited)
       return box(
@@ -431,9 +543,9 @@ function NextStep({
       const enough = t.teamsComplete >= MIN_TEAMS_TO_START;
       return box(
         <>
-          {heading(enough ? "Ready when you are" : `Add ${noun}`)}
+          {heading(enough ? "Ready when you are" : t.official ? "Waiting for sign-ups" : `Add ${noun}`)}
           <p className="mt-1 text-sm text-mist">
-            {t.teamsComplete} of {t.capacityTeams} {noun} ready.{" "}
+            {t.teamsComplete} of {t.capacityTeams} {noun} {t.official ? "signed up" : "ready"}.{" "}
             {enough
               ? "Press Start and the matches are made for you. Late arrivals? Wait, or start without them."
               : `You need at least ${MIN_TEAMS_TO_START} to start — add them in the ${t.playersPerTeam === 1 ? "Players" : "Teams"} tab.`}
@@ -451,7 +563,7 @@ function NextStep({
       <>
         {heading("You're in!")}
         <p className="mt-1 text-sm text-mist">
-          Waiting for {t.organizer.nickname} to start. {t.teamsComplete} of {t.capacityTeams} {noun} ready.
+          Waiting for {t.official ? "Cue Point" : t.organizer.nickname} to start. {t.teamsComplete} of {t.capacityTeams} {noun} ready.
         </p>
       </>,
       "plain",
@@ -753,8 +865,12 @@ function PlayersTab({
           <div className="mt-3">
             <PlayerPicker exclude={new Set()} onPick={onAdd} disabled={busy} />
           </div>
-          <p className="mb-2 mt-4 text-sm text-mist">Not a member? Type their name (no points for guest matches):</p>
-          <GuestAdder onAdd={onAdd} disabled={busy} />
+          {!t.official && (
+            <>
+              <p className="mb-2 mt-4 text-sm text-mist">Not a member? Type their name (no points for guest matches):</p>
+              <GuestAdder onAdd={onAdd} disabled={busy} />
+            </>
+          )}
           {draft.length > 0 && (
             <button type="button" onClick={onClearDraft} className="mt-2 text-sm text-mist underline">
               Clear unfinished team

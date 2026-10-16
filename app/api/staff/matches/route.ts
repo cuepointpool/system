@@ -6,7 +6,8 @@ import type { MatchType } from "@/lib/ecosystem/types";
 
 export const dynamic = "force-dynamic";
 
-const TYPES: MatchType[] = ["casual", "ranked", "tournament"];
+// tournament matches are entered inside each tournament, not here
+const TYPES: MatchType[] = ["casual", "ranked"];
 
 export async function GET(req: NextRequest) {
   if (!(await staffActor(req)))
@@ -50,8 +51,6 @@ export async function POST(req: NextRequest) {
       scoreB: Number(body.scoreB ?? 0),
       winnerId: body.winnerId!,
       tableName: body.tableName!,
-      tournamentId: body.tournamentId ?? null,
-      tournamentRound: body.tournamentRound ?? null,
       playedAt: body.playedAt,
     },
     actor,

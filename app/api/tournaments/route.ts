@@ -1,18 +1,9 @@
 import { NextResponse } from "next/server";
-import {
-  derivedTournamentStatus,
-  getTournaments,
-  tournamentSpotsLeft,
-} from "@/lib/ecosystem/store";
+import { listOfficialTournaments } from "@/lib/friends/store";
 
 export const dynamic = "force-dynamic";
 
+/** the tournaments Cue Point hosts (public) */
 export async function GET() {
-  const tournaments = (await getTournaments()).map((t) => ({
-    ...t,
-    status: derivedTournamentStatus(t),
-    spotsLeft: tournamentSpotsLeft(t),
-    registeredCount: t.registrations.filter((r) => r.playerId).length,
-  }));
-  return NextResponse.json({ tournaments });
+  return NextResponse.json({ tournaments: await listOfficialTournaments() });
 }
