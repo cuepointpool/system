@@ -27,7 +27,7 @@ export const FINISH_LABEL: Record<Finish, string> = {
   champion: "Champion",
   runner_up: "Runner-up",
   semi_final: "Semi-final",
-  quarter_final: "Quarter-final",
+  quarter_final: "Last 8",
   round_of_16: "Last 16",
   played: "Played",
 };

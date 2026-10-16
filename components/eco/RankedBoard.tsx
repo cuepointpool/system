@@ -13,8 +13,8 @@ import type { RankedLeaderboardRow } from "@/lib/ecosystem/store";
 const POINT_GUIDE: [string, number][] = [
   ["Champion", RANKED_POINTS.champion],
   ["Runner-up", RANKED_POINTS.runnerUp],
-  ["Semi-final", RANKED_POINTS.semiFinal],
-  ["Quarter-final", RANKED_POINTS.quarterFinal],
+  ["Semi-final / last 4", RANKED_POINTS.semiFinal],
+  ["Last 8", RANKED_POINTS.quarterFinal],
   ["Last 16", RANKED_POINTS.roundOf16],
   ["Took part", RANKED_POINTS.played],
 ];
