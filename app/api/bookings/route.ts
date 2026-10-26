@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { getViewer, staffActor } from "@/lib/ecosystem/identity";
 import { getTableById } from "@/lib/tables";
+import { notifyNewBooking } from "@/lib/notify/whatsapp";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +81,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const booking = await createBooking(input);
+    // WhatsApp the owners in the background — never holds up the customer
+    void notifyNewBooking(booking);
     return NextResponse.json({ booking }, { status: 201 });
   } catch (e) {
     if (e instanceof BookingConflict) {
