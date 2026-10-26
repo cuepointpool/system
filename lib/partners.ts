@@ -5,13 +5,13 @@
    password they can sign in at /partners (separate `cp_partner`
    cookie, same signed-token scheme as player sessions).
 
-   Access to the finance module:
-     - position 'treasurer'  → may edit (POST/PATCH/DELETE)
-     - any other signed-in partner → read-only (GET)
-     - a signed-in admin player → full access (unchanged)
+   Access to the accounts:
+     - every signed-in investor → can view (GET)
+     - an investor the admin has enabled (can_edit_accounts) → may edit
+     - a signed-in admin player → full access
 
-   Assigning usernames / passwords / positions is admin-only
-   (see app/api/admin/partners/route.ts).
+   Assigning usernames / passwords / positions / edit access / shares
+   is admin-only (see app/api/admin/partners/route.ts).
    ============================================================ */
 
 import { cookies } from "next/headers";
@@ -59,6 +59,7 @@ export interface PartnerAccount {
   positions: PartnerPosition[];
   active: boolean;
   hasLogin: boolean;
+  canEditAccounts: boolean;
 }
 
 interface PartnerRow {
@@ -68,6 +69,7 @@ interface PartnerRow {
   password_hash: string | null;
   positions: string[] | null;
   active: boolean;
+  can_edit_accounts: boolean | null;
 }
 
 const toAccount = (r: PartnerRow): PartnerAccount => ({
@@ -77,10 +79,12 @@ const toAccount = (r: PartnerRow): PartnerAccount => ({
   positions: (r.positions ?? []).filter(isPosition),
   active: r.active,
   hasLogin: !!r.username && !!r.password_hash,
+  canEditAccounts: !!r.can_edit_accounts,
 });
 
-export const isTreasurer = (a: PartnerAccount | null): boolean =>
-  !!a && a.positions.includes("treasurer");
+/** May this investor add, correct or delete accounting entries? (admin-granted) */
+export const canEditAccounts = (a: PartnerAccount | null): boolean =>
+  !!a && a.canEditAccounts;
 
 /* ------------------------------- lookups ------------------------------- */
 
@@ -129,20 +133,20 @@ export async function verifyPartnerLogin(
 
 /* ---------------------------- access guards --------------------------- */
 
-/** Actor string if the request may VIEW finance (admin or any partner). */
-export async function financeViewer(req: NextRequest): Promise<string | null> {
+/** Actor string if the request may VIEW the accounts (admin or any investor). */
+export async function accountsViewer(req: NextRequest): Promise<string | null> {
   const admin = await adminActor(req);
   if (admin) return admin;
   const p = await partnerViewer();
   return p ? `partner:${p.username ?? p.name}` : null;
 }
 
-/** Actor string if the request may EDIT finance (admin or treasurer). */
-export async function financeEditor(req: NextRequest): Promise<string | null> {
+/** Actor string if the request may EDIT the accounts (admin or an enabled investor). */
+export async function accountsEditor(req: NextRequest): Promise<string | null> {
   const admin = await adminActor(req);
   if (admin) return admin;
   const p = await partnerViewer();
-  return isTreasurer(p) ? `partner:${p!.username ?? p!.name}` : null;
+  return canEditAccounts(p) ? `partner:${p!.username ?? p!.name}` : null;
 }
 
 /* ------------------------- admin: manage access ---------------------- */

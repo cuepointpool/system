@@ -69,20 +69,24 @@ CREATE INDEX bookings_date_table_idx ON bookings (date, table_id);
 CREATE INDEX bookings_open_session_idx ON bookings (checked_in_at) WHERE checked_out_at IS NULL;
 
 -- --------------------------------------------------------- business finance ---
--- Owner-facing bookkeeping: the partners and their capital, business expenses
--- (with receipt images), and the daily cash drawer. Admin-only in the console.
+-- Owner-facing bookkeeping: the investors (partners), the accounting ledger
+-- (acct_entries — every cash/bank movement) and the daily cash box.
+-- capital_contributions + business_expenses belong to the old finance module
+-- and are no longer read.
 
 CREATE TABLE business_partners (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   active        BOOLEAN NOT NULL DEFAULT TRUE,
   sort_order    INT NOT NULL DEFAULT 0,
-  -- optional sign-in at /partners; 'treasurer' position may edit finance,
-  -- any other signed-in partner sees it read-only.
+  -- optional sign-in at /partners. Every signed-in investor can view the
+  -- accounts; only those the admin enables (can_edit_accounts) can edit.
   username      TEXT UNIQUE,
   password_hash TEXT,
   positions     TEXT[] NOT NULL DEFAULT '{}'
     CHECK (positions <@ ARRAY['director','it_admin','secretary','marketing','treasurer']::text[]),
+  share_pct         INT NOT NULL DEFAULT 0 CHECK (share_pct BETWEEN 0 AND 100),
+  can_edit_accounts BOOLEAN NOT NULL DEFAULT FALSE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -123,6 +127,42 @@ CREATE TABLE cash_days (
   closed_by      TEXT,
   closed_at      TIMESTAMPTZ
 );
+
+-- Every money movement. `cash` / `bank` are positive; the kind sets direction:
+--   opening, income, capital → +   expense, drawing → −
+--   deposit (cash → bank) and withdrawal (bank → cash): cash = bank = amount
+CREATE TABLE acct_entries (
+  id            TEXT PRIMARY KEY,
+  date          DATE NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN
+                  ('opening','income','expense','deposit','withdrawal','capital','drawing')),
+  category      TEXT NOT NULL DEFAULT '',
+  description   TEXT NOT NULL DEFAULT '',
+  table_id      TEXT,
+  table_name    TEXT,
+  start_time    TEXT,
+  end_time      TEXT,
+  minutes       INT,
+  partner_id    TEXT REFERENCES business_partners(id) ON DELETE SET NULL,
+  cash          BIGINT NOT NULL DEFAULT 0 CHECK (cash >= 0),
+  bank          BIGINT NOT NULL DEFAULT 0 CHECK (bank >= 0),
+  receipt_image TEXT,
+  created_by    TEXT NOT NULL DEFAULT 'staff',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX acct_entries_date_idx ON acct_entries (date);
+
+-- every add / edit / delete of an entry, before + after (admin-only view)
+CREATE TABLE acct_entry_log (
+  id         BIGSERIAL PRIMARY KEY,
+  entry_id   TEXT NOT NULL,
+  action     TEXT NOT NULL CHECK (action IN ('create','edit','delete')),
+  actor      TEXT NOT NULL,
+  at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  before     JSONB,
+  after      JSONB
+);
+CREATE INDEX acct_entry_log_at_idx ON acct_entry_log (at DESC);
 
 -- ----------------------------------------------------------- player model ---
 

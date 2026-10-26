@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isTreasurer, partnerViewer } from "@/lib/partners";
+import { canEditAccounts, partnerViewer } from "@/lib/partners";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export async function GET() {
       name: partner.name,
       username: partner.username,
       positions: partner.positions,
-      canEditFinance: isTreasurer(partner),
+      canEditFinance: canEditAccounts(partner),
     },
   });
 }

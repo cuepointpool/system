@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminActor } from "@/lib/ecosystem/identity";
-import { listPartners } from "@/lib/finance";
+import { listPartners, updatePartner } from "@/lib/accounts";
 import { PARTNER_POSITIONS, setPartnerAccess } from "@/lib/partners";
 
 export const dynamic = "force-dynamic";
 
-/** Admin-only: assign a partner's username, password and committee positions. */
+/** Admin-only: an investor's login, positions, ownership share and edit access. */
 export async function GET(req: NextRequest) {
   if (!(await adminActor(req)))
     return NextResponse.json({ error: "Admins only" }, { status: 403 });
@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
       active: p.active,
       username: p.username,
       positions: p.positions,
-      hasLogin: !!p.username,
+      hasLogin: p.hasLogin,
+      sharePct: p.sharePct,
+      canEditAccounts: p.canEditAccounts,
     })),
   });
 }
@@ -47,10 +49,30 @@ export async function PATCH(req: NextRequest) {
       { status: 422 },
     );
 
+  const sharePct = body.sharePct === undefined ? undefined : Number(body.sharePct);
+  if (sharePct !== undefined && !(Number.isInteger(sharePct) && sharePct >= 0 && sharePct <= 100))
+    return NextResponse.json(
+      { error: "Share must be a whole number from 0 to 100" },
+      { status: 422 },
+    );
+  const name = body.name === undefined ? undefined : String(body.name).trim();
+  if (name !== undefined && !name)
+    return NextResponse.json({ error: "Name can't be empty" }, { status: 422 });
+
   try {
     await setPartnerAccess(
       id,
       { username, password, positions: body.positions },
+      actor,
+    );
+    await updatePartner(
+      id,
+      {
+        name,
+        sharePct,
+        canEditAccounts:
+          body.canEditAccounts === undefined ? undefined : !!body.canEditAccounts,
+      },
       actor,
     );
     return NextResponse.json({ ok: true });

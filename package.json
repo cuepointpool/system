@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:setup": "node --env-file=.env --import tsx scripts/setup.ts",
+    "accounts:reset": "node --env-file=.env --import tsx scripts/accounts-reset.ts",
     "test:friends": "node --import tsx scripts/test-friends.ts",
     "test:structure": "node --import tsx scripts/test-structure.ts",
     "test:ranked": "node --import tsx scripts/test-ranked.ts",

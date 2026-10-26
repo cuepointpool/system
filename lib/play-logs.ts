@@ -13,7 +13,8 @@ import {
 /* ------------------------------------------------------------------
    Daily play log — what was actually played, entered at the counter.
 
-   This is the table income (lib/finance.ts). Online bookings are only
+   Staff record who played here; the money itself is entered in the accounts
+   day book (lib/accounts.ts), which shows this log for cross-checking. Online bookings are only
    reservations: they never count as money, but a member's past
    bookings DO count toward their playing hours, and so toward free
    time. When a session is logged against a reservation (booking_id),

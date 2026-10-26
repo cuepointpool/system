@@ -319,7 +319,7 @@ export function Navbar() {
                       {partner.name}
                     </span>
                     <span className="text-[11px] text-mist">
-                      partner · {partner.canEditFinance ? "finance (edit)" : "finance (view)"}
+                      investor · {partner.canEditFinance ? "accounts (edit)" : "accounts (view)"}
                     </span>
                   </span>
                 </Link>

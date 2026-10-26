@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { computeStats } from "@/lib/ecosystem/store";
-import { isTreasurer, partnerViewer } from "@/lib/partners";
+import { canEditAccounts, partnerViewer } from "@/lib/partners";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export async function GET() {
         name: partnerAcct.name,
         username: partnerAcct.username,
         positions: partnerAcct.positions,
-        canEditFinance: isTreasurer(partnerAcct),
+        canEditFinance: canEditAccounts(partnerAcct),
       }
     : null;
 

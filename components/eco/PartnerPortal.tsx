@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { FinanceTab } from "./AdminConsole";
+import { AccountsApp } from "./accounts/AccountsApp";
 import { cn } from "@/lib/utils";
 
 type Me = {
@@ -41,18 +41,18 @@ export function PartnerPortal() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.28em] text-teal">
-            Cue Point · partners
+            Cue Point · investors
           </p>
           <h1 className="mt-1 font-display text-3xl font-bold text-white">
-            Partner portal
+            Investor portal
           </h1>
           <p className="mt-1.5 text-sm text-mist">
-            The business finance picture — capital, ownership, expenses and daily
-            cash.{" "}
+            The Cue Point books — cash, bank, daily income and expenses, and the
+            P&amp;L, cash flow and balance sheet.{" "}
             {me
               ? me.canEditFinance
                 ? "You can record entries."
-                : "Read-only for your positions."
+                : "View only — the admin can enable editing for you."
               : "Sign in with the username your admin gave you."}
           </p>
         </div>
@@ -93,11 +93,7 @@ export function PartnerPortal() {
         )}
         {me === null && <PartnerLogin onDone={load} />}
         {me && (
-          <FinanceTab
-            headers={{}}
-            readOnly={!me.canEditFinance}
-            canManageRoster={false}
-          />
+          <AccountsApp />
         )}
       </div>
     </div>
@@ -135,7 +131,7 @@ function PartnerLogin({ onDone }: { onDone: () => void }) {
       onSubmit={submit}
       className="max-w-sm rounded-2xl border border-white/10 bg-white/[0.02] p-5"
     >
-      <p className="text-sm font-medium text-white">Partner sign-in</p>
+      <p className="text-sm font-medium text-white">Investor sign-in</p>
       <label className="mt-3 block">
         <span className="mb-1 block text-[11px] text-mist">Username</span>
         <input

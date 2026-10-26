@@ -152,7 +152,7 @@ async function main() {
     // four partner slots for the business-finance module (rename in the console)
     for (let i = 1; i <= 4; i++) {
       await client.query(
-        `INSERT INTO business_partners (id, name, sort_order) VALUES ($1,$2,$3)`,
+        `INSERT INTO business_partners (id, name, sort_order, share_pct) VALUES ($1,$2,$3,25)`,
         [`bp_${i}`, `Partner ${i}`, i - 1],
       );
     }

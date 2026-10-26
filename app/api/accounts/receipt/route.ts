@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getExpenseReceipt } from "@/lib/finance";
-import { financeViewer } from "@/lib/partners";
+import { getEntryReceipt } from "@/lib/accounts";
+import { accountsViewer } from "@/lib/partners";
 
 export const dynamic = "force-dynamic";
 
-/** Serves an expense's receipt image so `<img src>` can render it directly. */
+/** Serves an accounting entry's receipt so `<img src>` can render it directly. */
 export async function GET(req: NextRequest) {
-  if (!(await financeViewer(req)))
+  if (!(await accountsViewer(req)))
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 422 });
 
-  const dataUrl = await getExpenseReceipt(id);
+  const dataUrl = await getEntryReceipt(id);
   if (!dataUrl)
     return NextResponse.json({ error: "No receipt" }, { status: 404 });
 

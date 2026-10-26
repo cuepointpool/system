@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PARTNER_COOKIE, SESSION_MAX_AGE } from "@/lib/auth";
 import {
-  isTreasurer,
+  canEditAccounts,
   partnerSessionToken,
   verifyPartnerLogin,
 } from "@/lib/partners";
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       name: partner.name,
       username: partner.username,
       positions: partner.positions,
-      canEditFinance: isTreasurer(partner),
+      canEditFinance: canEditAccounts(partner),
     },
   });
   res.cookies.set(PARTNER_COOKIE, partnerSessionToken(partner.id), {
