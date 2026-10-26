@@ -1,17 +1,15 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Tabs } from "./Primitives";
 import { DailyLogTab } from "./DailyLogTab";
 import { AccountsApp } from "./accounts/AccountsApp";
 import type { OfficialListItem } from "@/lib/friends/types";
-import { cn, formatDateShort, formatLKR, label12h, timeAgo } from "@/lib/utils";
+import { cn, formatDateShort, label12h, timeAgo } from "@/lib/utils";
 import {
   DURATION_OPTIONS,
-  billableHours,
-  priceFor,
   slotStartsForDate,
   type Booking,
 } from "@/lib/booking";
@@ -1822,6 +1820,9 @@ function TableRowEditor({
 
 /* ================= Bookings ================= */
 
+/* Reservations only: the admin books a slot so customers see it as busy.
+   No sessions, prices or payments here — money lives in Accounts. */
+
 type TableLite = { id: string; label: string; area: string; seats: number };
 type PlayerLite = { id: string; fullName: string; nickname: string };
 
@@ -1834,18 +1835,8 @@ function durLabel(h: number) {
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
-function localDT(d = new Date()) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(
-    d.getHours(),
-  )}:${pad2(d.getMinutes())}`;
-}
 function localDate(d = new Date()) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-function hourAgoDT() {
-  const d = new Date();
-  d.setHours(d.getHours() - 1);
-  return localDT(d);
 }
 
 function BookingsTab({ headers }: { headers: Record<string, string> }) {
@@ -1853,10 +1844,10 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
   const [tables, setTables] = useState<TableLite[]>([]);
   const [players, setPlayers] = useState<PlayerLite[]>([]);
   const [fDate, setFDate] = useState("");
-  const [fStatus, setFStatus] = useState("");
+  const [fStatus, setFStatus] = useState("CONFIRMED");
+  const [upcoming, setUpcoming] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [extendId, setExtendId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     const qs = new URLSearchParams();
@@ -1931,15 +1922,14 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
     [headers, load],
   );
 
-  const list = bookings ?? [];
-  const openSessions = list.filter((b) => b.checkedInAt && !b.checkedOutAt);
-  // online reservations aren't income — the Daily log is
-  const revenue = list
-    .filter((b) => b.status !== "CANCELLED" && b.origin !== "online")
-    .reduce((s, b) => s + b.totalAmount, 0);
-  const unpaid = list.filter(
-    (b) => b.status !== "CANCELLED" && b.paymentStatus === "unpaid",
-  ).length;
+  const today = localDate();
+  const list = (bookings ?? [])
+    .filter((b) => fDate || !upcoming || b.date >= today)
+    .sort((a, b) =>
+      upcoming && !fDate
+        ? (a.date + a.startTime).localeCompare(b.date + b.startTime)
+        : 0,
+    );
 
   return (
     <div className="space-y-9">
@@ -1949,38 +1939,12 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
         </p>
       )}
 
-      {/* ---- live sessions ---- */}
       <section>
         <SectionHead
-          title="On the floor now"
-          sub="Walk-in sessions that are still running. End one to bill the played time."
+          title="Reserve a table"
+          sub="Book a slot for a customer — it shows as busy to everyone booking online. No payment is recorded here."
         />
-        {openSessions.length === 0 ? (
-          <p className="text-sm text-mist">No open sessions right now.</p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {openSessions.map((b) => (
-              <OpenSessionCard
-                key={b.id}
-                b={b}
-                busy={busy}
-                onEnd={(payload) =>
-                  act({ id: b.id, action: "checkout", ...payload })
-                }
-                onCancel={() => act({ id: b.id, action: "cancel" })}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* ---- assign a table ---- */}
-      <section>
-        <SectionHead
-          title="Assign a table"
-          sub="Seat a walk-in now, log a visit that already finished, or reserve a slot for someone who didn't book online. Link a registered player if they have an account."
-        />
-        <AssignForm
+        <ReserveForm
           tables={tables}
           players={players}
           busy={busy}
@@ -1988,9 +1952,11 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
         />
       </section>
 
-      {/* ---- all bookings ---- */}
       <section>
-        <SectionHead title="All bookings" sub="Every reservation, walk-in and staff booking." />
+        <SectionHead
+          title="Bookings"
+          sub="Reservations made online by members or here by the admin."
+        />
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <label className="block">
             <span className="mb-1 block text-[11px] text-mist">Date</span>
@@ -2008,21 +1974,25 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
               onChange={(e) => setFStatus(e.target.value)}
               className="input"
             >
-              <option value="">All</option>
               <option value="CONFIRMED">Confirmed</option>
               <option value="CANCELLED">Cancelled</option>
-              <option value="PENDING">Pending</option>
+              <option value="">All</option>
             </select>
           </label>
-          {(fDate || fStatus) && (
-            <button
-              onClick={() => {
-                setFDate("");
-                setFStatus("");
-              }}
-              className="btn-ghost px-3 py-2 text-xs"
-            >
-              Clear
+          {!fDate && (
+            <label className="flex items-center gap-2 pb-2.5 text-xs text-mist">
+              <input
+                type="checkbox"
+                checked={upcoming}
+                onChange={(e) => setUpcoming(e.target.checked)}
+                className="h-4 w-4 accent-teal"
+              />
+              Upcoming only
+            </label>
+          )}
+          {fDate && (
+            <button onClick={() => setFDate("")} className="btn-ghost px-3 py-2 text-xs">
+              Clear date
             </button>
           )}
           <button onClick={load} className="btn-ghost px-4 py-2 text-xs">
@@ -2031,165 +2001,85 @@ function BookingsTab({ headers }: { headers: Record<string, string> }) {
         </div>
 
         {bookings && (
-          <>
-            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <MiniStat k="Shown" v={String(list.length)} />
-              <MiniStat k="Open sessions" v={String(openSessions.length)} />
-              <MiniStat k="Unpaid" v={String(unpaid)} />
-              <MiniStat k="Staff-entered income" v={formatLKR(revenue)} />
-            </div>
-            <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full min-w-[860px] text-left text-sm">
-                <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wide text-mist">
-                  <tr>
-                    {[
-                      "Ref",
-                      "Table",
-                      "When",
-                      "Party",
-                      "Name",
-                      "Origin",
-                      "Total",
-                      "Paid",
-                      "Status",
-                      "",
-                    ].map((h) => (
+          <div className="overflow-x-auto rounded-2xl border border-white/10">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wide text-mist">
+                <tr>
+                  {["Ref", "Table", "When", "Party", "Name", "Phone", "Booked by", "Status", ""].map(
+                    (h) => (
                       <th key={h} className="px-3 py-3 font-medium">
                         {h}
                       </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/8">
-                  {list.map((b) => {
-                    const openNow = !!b.checkedInAt && !b.checkedOutAt;
-                    return (
-                      <Fragment key={b.id}>
-                      <tr className="text-white/90">
-                        <td className="px-3 py-2.5 font-mono text-[11px] text-teal">
-                          {b.reference}
-                        </td>
-                        <td className="px-3 py-2.5">{b.tableName}</td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">
-                          {b.date} · {label12h(b.startTime)}
-                          {openNow ? (
-                            <span className="text-teal"> · live</span>
-                          ) : (
-                            ` · ${durLabel(b.durationHrs)}`
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5">{b.partySize}</td>
-                        <td className="px-3 py-2.5">{b.customerName}</td>
-                        <td className="px-3 py-2.5">
-                          <OriginBadge origin={b.origin} />
-                        </td>
-                        <td className="px-3 py-2.5">{formatLKR(b.totalAmount)}</td>
-                        <td className="px-3 py-2.5">
-                          <button
-                            disabled={busy || b.status === "CANCELLED"}
-                            onClick={() =>
-                              act({
-                                id: b.id,
-                                action:
-                                  b.paymentStatus === "paid" ? "unpay" : "pay",
-                              })
-                            }
-                            className={cn(
-                              "rounded-full px-2 py-1 text-[11px] transition-colors disabled:opacity-40",
-                              b.paymentStatus === "paid"
-                                ? "bg-teal/15 text-teal hover:bg-teal/25"
-                                : "bg-amber-400/15 text-amber-200 hover:bg-amber-400/25",
-                            )}
-                          >
-                            {b.paymentStatus === "paid" ? "Paid" : "Unpaid"}
-                          </button>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <span
-                            className={cn(
-                              "rounded-full px-2 py-1 text-[11px]",
-                              b.status === "CONFIRMED"
-                                ? "bg-teal/15 text-teal"
-                                : "bg-white/10 text-mist",
-                            )}
-                          >
-                            {b.status}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <div className="flex gap-2">
-                            {b.status !== "CANCELLED" && !openNow && (
-                              <button
-                                disabled={busy}
-                                onClick={() =>
-                                  setExtendId(extendId === b.id ? null : b.id)
-                                }
-                                className="text-[11px] text-teal hover:text-teal-bright"
-                              >
-                                + time
-                              </button>
-                            )}
-                            {b.status !== "CANCELLED" && !openNow && (
-                              <button
-                                disabled={busy}
-                                onClick={() =>
-                                  act({ id: b.id, action: "cancel" })
-                                }
-                                className="text-[11px] text-mist hover:text-white"
-                              >
-                                Cancel
-                              </button>
-                            )}
-                            <button
-                              disabled={busy}
-                              onClick={() => {
-                                if (confirm(`Delete booking ${b.reference}?`))
-                                  act({ id: b.id }, "DELETE");
-                              }}
-                              className="text-[11px] text-rose-300/80 hover:text-rose-200"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      {extendId === b.id && (
-                        <tr className="bg-teal/[0.04]">
-                          <td colSpan={10} className="px-3 py-3">
-                            <ExtendRow
-                              b={b}
-                              busy={busy}
-                              onConfirm={async (addHours, paid) => {
-                                const done = await act({
-                                  id: b.id,
-                                  action: "extend",
-                                  addHours,
-                                  paymentStatus: paid ? "paid" : undefined,
-                                });
-                                if (done) setExtendId(null);
-                              }}
-                              onClose={() => setExtendId(null)}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                    );
-                  })}
-                  {list.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={10}
-                        className="px-3 py-6 text-center text-sm text-mist"
-                      >
-                        No bookings match.
-                      </td>
-                    </tr>
+                    ),
                   )}
-                </tbody>
-              </table>
-            </div>
-          </>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/8">
+                {list.map((b) => (
+                  <tr key={b.id} className="text-white/90">
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-teal">
+                      {b.reference}
+                    </td>
+                    <td className="px-3 py-2.5">{b.tableName}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5">
+                      {formatDateShort(b.date)} · {label12h(b.startTime)} · {durLabel(b.durationHrs)}
+                    </td>
+                    <td className="px-3 py-2.5">{b.partySize}</td>
+                    <td className="px-3 py-2.5">{b.customerName}</td>
+                    <td className="px-3 py-2.5 text-mist">{b.phone || "—"}</td>
+                    <td className="px-3 py-2.5">
+                      <OriginBadge origin={b.origin} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-1 text-[11px]",
+                          b.status === "CANCELLED"
+                            ? "bg-white/10 text-mist"
+                            : "bg-teal/15 text-teal",
+                        )}
+                      >
+                        {b.status === "CANCELLED" ? "Cancelled" : "Confirmed"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex gap-3">
+                        {b.status !== "CANCELLED" && (
+                          <button
+                            disabled={busy}
+                            onClick={() => {
+                              if (confirm(`Cancel booking ${b.reference}? The slot opens up again.`))
+                                act({ id: b.id, action: "cancel" });
+                            }}
+                            className="text-[11px] text-mist hover:text-white"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        <button
+                          disabled={busy}
+                          onClick={() => {
+                            if (confirm(`Delete booking ${b.reference}?`))
+                              act({ id: b.id }, "DELETE");
+                          }}
+                          className="text-[11px] text-rose-300/80 hover:text-rose-200"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {list.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-3 py-6 text-center text-sm text-mist">
+                      No bookings match.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>
@@ -2206,224 +2096,20 @@ function SectionHead({ title, sub }: { title: string; sub: string }) {
 }
 
 function OriginBadge({ origin }: { origin: Booking["origin"] }) {
-  const map: Record<Booking["origin"], string> = {
-    online: "bg-white/10 text-mist",
-    walk_in: "bg-teal/15 text-teal",
-    staff: "bg-indigo-400/15 text-indigo-200",
-  };
-  const label = origin === "walk_in" ? "walk-in" : origin;
+  const online = origin === "online";
   return (
-    <span className={cn("rounded-full px-2 py-1 text-[11px]", map[origin])}>
-      {label}
+    <span
+      className={cn(
+        "rounded-full px-2 py-1 text-[11px]",
+        online ? "bg-white/10 text-mist" : "bg-indigo-400/15 text-indigo-200",
+      )}
+    >
+      {online ? "online" : "admin"}
     </span>
   );
 }
 
-const EXTEND_OPTS = [0.5, 1, 1.5, 2, 3];
-
-function ExtendRow({
-  b,
-  busy,
-  onConfirm,
-  onClose,
-}: {
-  b: Booking;
-  busy: boolean;
-  onConfirm: (addHours: number, paid: boolean) => void;
-  onClose: () => void;
-}) {
-  const [add, setAdd] = useState(1);
-  const [paid, setPaid] = useState(true);
-  const extra = priceFor(add);
-  return (
-    <div className="flex flex-wrap items-end gap-3">
-      <div>
-        <span className="mb-1 block text-[11px] text-mist">
-          Overstay — extra time played
-        </span>
-        <div className="flex gap-1.5">
-          {EXTEND_OPTS.map((h) => (
-            <button
-              key={h}
-              onClick={() => setAdd(h)}
-              className={cn(
-                "rounded-lg border px-2.5 py-1.5 text-xs transition-colors",
-                add === h
-                  ? "border-teal bg-teal/15 text-white"
-                  : "border-white/10 text-mist hover:border-white/25",
-              )}
-            >
-              +{durLabel(h)}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="text-xs text-mist">
-        Adds <span className="text-white">{formatLKR(extra)}</span> ·{" "}
-        {durLabel(b.durationHrs)} → {durLabel(b.durationHrs + add)} · new total{" "}
-        <span className="text-white">{formatLKR(b.totalAmount + extra)}</span>
-      </p>
-      <label className="flex items-center gap-2 text-xs text-mist">
-        <input
-          type="checkbox"
-          checked={paid}
-          onChange={(e) => setPaid(e.target.checked)}
-          className="h-4 w-4 accent-teal"
-        />
-        Extra collected
-      </label>
-      <div className="flex gap-2">
-        <button
-          disabled={busy}
-          onClick={() => onConfirm(add, paid)}
-          className="btn-primary px-4 py-2 text-xs"
-        >
-          Add &amp; charge
-        </button>
-        <button onClick={onClose} className="btn-ghost px-3 py-2 text-xs">
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function OpenSessionCard({
-  b,
-  busy,
-  onEnd,
-  onCancel,
-}: {
-  b: Booking;
-  busy: boolean;
-  onEnd: (p: {
-    checkedOutAt: string;
-    totalAmount: number;
-    paymentStatus: "paid" | "unpaid";
-  }) => void;
-  onCancel: () => void;
-}) {
-  const [tick, setTick] = useState(0);
-  const [ending, setEnding] = useState(false);
-  const [leftAt, setLeftAt] = useState(localDT());
-  const [amount, setAmount] = useState<string>("");
-  const [paid, setPaid] = useState(true);
-
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
-  void tick;
-
-  const inAt = b.checkedInAt ? new Date(b.checkedInAt) : new Date();
-  const endDate = ending ? new Date(leftAt) : new Date();
-  const mins = Math.max(0, (endDate.getTime() - inAt.getTime()) / 60000);
-  const billHrs = billableHours(mins);
-  const suggested = priceFor(billHrs);
-
-  return (
-    <div className="rounded-2xl border border-teal/30 bg-teal/[0.05] p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-display text-base font-semibold text-white">
-            {b.tableName}
-          </p>
-          <p className="mt-0.5 text-xs text-mist">
-            {b.customerName} · party {b.partySize}
-            {b.phone ? ` · ${b.phone}` : ""}
-          </p>
-        </div>
-        <span className="rounded-full bg-teal/15 px-2 py-1 text-[11px] text-teal">
-          live
-        </span>
-      </div>
-      <p className="mt-2 text-xs text-mist">
-        Seated {timeAgo(b.checkedInAt!)} ({label12h(b.startTime)}) ·{" "}
-        {Math.round(mins)} min so far · bill ≈{" "}
-        <span className="text-white">{formatLKR(suggested)}</span> ({durLabel(billHrs)})
-      </p>
-
-      {!ending ? (
-        <div className="mt-3 flex gap-2">
-          <button
-            disabled={busy}
-            onClick={() => {
-              setLeftAt(localDT());
-              setAmount(String(suggested));
-              setEnding(true);
-            }}
-            className="btn-primary px-4 py-2 text-xs"
-          >
-            End &amp; bill
-          </button>
-          <button
-            disabled={busy}
-            onClick={onCancel}
-            className="btn-ghost px-3 py-2 text-xs"
-          >
-            Cancel session
-          </button>
-        </div>
-      ) : (
-        <div className="mt-3 space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-mist">Leaving time</span>
-            <input
-              type="datetime-local"
-              value={leftAt}
-              onChange={(e) => setLeftAt(e.target.value)}
-              className="input"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-mist">
-              Amount to charge (LKR) · suggested {formatLKR(suggested)}
-            </span>
-            <input
-              type="number"
-              min={0}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="input"
-            />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-mist">
-            <input
-              type="checkbox"
-              checked={paid}
-              onChange={(e) => setPaid(e.target.checked)}
-              className="h-4 w-4 accent-teal"
-            />
-            Payment collected
-          </label>
-          <div className="flex gap-2 pt-1">
-            <button
-              disabled={busy}
-              onClick={() =>
-                onEnd({
-                  checkedOutAt: leftAt,
-                  totalAmount: Number(amount),
-                  paymentStatus: paid ? "paid" : "unpaid",
-                })
-              }
-              className="btn-primary px-4 py-2 text-xs"
-            >
-              Confirm checkout
-            </button>
-            <button
-              onClick={() => setEnding(false)}
-              className="btn-ghost px-3 py-2 text-xs"
-            >
-              Back
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AssignForm({
+function ReserveForm({
   tables,
   players,
   busy,
@@ -2434,7 +2120,6 @@ function AssignForm({
   busy: boolean;
   onSubmit: (body: Record<string, unknown>) => Promise<boolean>;
 }) {
-  const [mode, setMode] = useState<"session" | "logged" | "booking">("session");
   const [tableId, setTableId] = useState("");
   const [party, setParty] = useState(2);
   const [name, setName] = useState("");
@@ -2443,106 +2128,80 @@ function AssignForm({
   const [date, setDate] = useState(localDate());
   const [start, setStart] = useState("");
   const [dur, setDur] = useState(2);
-  const [startAt, setStartAt] = useState(hourAgoDT());
-  const [endAt, setEndAt] = useState(localDT());
-  const [amount, setAmount] = useState("");
-  const [paid, setPaid] = useState(true);
   const [ok, setOk] = useState<string | null>(null);
 
   const slots = useMemo(() => slotStartsForDate(date), [date]);
   // derive effective values so we never have to sync defaults in an effect
   const effTableId = tableId || tables[0]?.id || "";
   const effStart = slots.includes(start) ? start : slots[0] ?? "";
-
-  const loggedMins =
-    mode === "logged" && startAt && endAt
-      ? (new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000
-      : 0;
-  const loggedSuggest = loggedMins > 0 ? priceFor(billableHours(loggedMins)) : 0;
-
-  const canSubmit =
-    !!effTableId &&
-    name.trim().length >= 2 &&
-    party >= 1 &&
-    (mode === "session" ||
-      (mode === "logged" && loggedMins > 0) ||
-      (mode === "booking" && !!date && !!effStart));
+  const canSubmit = !!effTableId && name.trim().length >= 2 && party >= 1 && !!date && !!effStart;
 
   async function submit() {
     setOk(null);
-    const base: Record<string, unknown> = {
-      mode,
+    const done = await onSubmit({
+      mode: "booking",
       tableId: effTableId,
       partySize: party,
       customerName: name.trim(),
       phone: phone.trim() || undefined,
       playerId: playerId || undefined,
-    };
-    const body =
-      mode === "booking"
-        ? { ...base, date, startTime: effStart, durationHrs: dur }
-        : mode === "logged"
-          ? {
-              ...base,
-              startAt,
-              endAt,
-              amount: amount === "" ? undefined : Number(amount),
-              paid,
-            }
-          : base;
-    const done = await onSubmit(body);
+      date,
+      startTime: effStart,
+      durationHrs: dur,
+    });
     if (done) {
-      setOk(
-        mode === "session"
-          ? `Session started for ${name.trim()}.`
-          : mode === "logged"
-            ? `Visit logged for ${name.trim()}.`
-            : `Booking created for ${name.trim()}.`,
-      );
+      const t = tables.find((x) => x.id === effTableId);
+      setOk(`Booked ${t?.label ?? "table"} for ${name.trim()} · ${formatDateShort(date)} ${label12h(effStart)}.`);
       setName("");
       setPhone("");
       setPlayerId("");
-      setAmount("");
     }
   }
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(["session", "logged", "booking"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={cn(
-              "rounded-lg border px-3 py-2 text-xs transition-colors",
-              mode === m
-                ? "border-teal bg-teal/15 text-white"
-                : "border-white/10 text-mist hover:border-white/25",
-            )}
-          >
-            {m === "session"
-              ? "Walk-in — start now"
-              : m === "logged"
-                ? "Log a past visit"
-                : "Reserve a slot"}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="block sm:col-span-2">
           <span className="mb-1 block text-[11px] text-mist">Table</span>
-          <select
-            value={effTableId}
-            onChange={(e) => setTableId(e.target.value)}
-            className="input"
-          >
+          <select value={effTableId} onChange={(e) => setTableId(e.target.value)} className="input">
             {tables.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.label} · {t.area} · {t.seats} seats
+                {t.label} · {t.area}
               </option>
             ))}
           </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-mist">Date</span>
+          <input type="date" value={date} min={localDate()} onChange={(e) => setDate(e.target.value)} className="input" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-mist">Start</span>
+          <select value={effStart} onChange={(e) => setStart(e.target.value)} className="input">
+            {slots.map((s) => (
+              <option key={s} value={s}>
+                {label12h(s)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-mist">Length</span>
+          <select value={dur} onChange={(e) => setDur(Number(e.target.value))} className="input">
+            {DURATION_OPTIONS.map((h) => (
+              <option key={h} value={h}>
+                {durLabel(h)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-mist">Customer name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name on the booking" className="input" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-mist">Phone (optional)</span>
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07X XXX XXXX" inputMode="tel" className="input" />
         </label>
         <label className="block">
           <span className="mb-1 block text-[11px] text-mist">Party size</span>
@@ -2555,11 +2214,8 @@ function AssignForm({
             className="input"
           />
         </label>
-
-        <label className="block">
-          <span className="mb-1 block text-[11px] text-mist">
-            Registered player (optional)
-          </span>
+        <label className="block sm:col-span-2 lg:col-span-4">
+          <span className="mb-1 block text-[11px] text-mist">Registered player (optional)</span>
           <select
             value={playerId}
             onChange={(e) => {
@@ -2569,7 +2225,7 @@ function AssignForm({
             }}
             className="input"
           >
-            <option value="">— walk-in / not registered —</option>
+            <option value="">— not a registered player —</option>
             {players.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.fullName} ({p.nickname})
@@ -2577,145 +2233,13 @@ function AssignForm({
             ))}
           </select>
         </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] text-mist">Customer name</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name on the session"
-            className="input"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-[11px] text-mist">Phone (optional)</span>
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="07X XXX XXXX"
-            inputMode="tel"
-            className="input"
-          />
-        </label>
-
-        {mode === "booking" && (
-          <>
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-mist">Date</span>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="input"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-mist">Start</span>
-              <select
-                value={effStart}
-                onChange={(e) => setStart(e.target.value)}
-                className="input"
-              >
-                {slots.map((s) => (
-                  <option key={s} value={s}>
-                    {label12h(s)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-mist">
-                Length · {formatLKR(priceFor(dur))}
-              </span>
-              <select
-                value={dur}
-                onChange={(e) => setDur(Number(e.target.value))}
-                className="input"
-              >
-                {DURATION_OPTIONS.map((h) => (
-                  <option key={h} value={h}>
-                    {durLabel(h)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-
-        {mode === "logged" && (
-          <>
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-mist">Started</span>
-              <input
-                type="datetime-local"
-                value={startAt}
-                onChange={(e) => setStartAt(e.target.value)}
-                className="input"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-mist">Left</span>
-              <input
-                type="datetime-local"
-                value={endAt}
-                onChange={(e) => setEndAt(e.target.value)}
-                className="input"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-mist">
-                Charge (LKR){" "}
-                {loggedSuggest > 0 && (
-                  <span className="text-mist/70">
-                    · suggested {formatLKR(loggedSuggest)} (
-                    {loggedMins > 0 ? Math.round(loggedMins) : 0} min)
-                  </span>
-                )}
-              </span>
-              <input
-                type="number"
-                min={0}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder={loggedSuggest > 0 ? String(loggedSuggest) : "auto"}
-                className="input"
-              />
-            </label>
-            <label className="flex items-center gap-2 pt-6 text-xs text-mist">
-              <input
-                type="checkbox"
-                checked={paid}
-                onChange={(e) => setPaid(e.target.checked)}
-                className="h-4 w-4 accent-teal"
-              />
-              Payment collected
-            </label>
-          </>
-        )}
       </div>
 
-      {ok && <p className="mt-3 text-xs text-teal">{ok}</p>}
+      {ok && <p className="mt-3 text-xs text-teal">✓ {ok}</p>}
 
-      <button
-        disabled={busy || !canSubmit}
-        onClick={submit}
-        className="btn-primary mt-4 px-5 py-2.5 text-sm disabled:opacity-40"
-      >
-        {mode === "session"
-          ? "Start session"
-          : mode === "logged"
-            ? "Log visit"
-            : "Create booking"}
+      <button disabled={busy || !canSubmit} onClick={submit} className="btn-primary mt-4 px-5 py-2.5 text-sm disabled:opacity-40">
+        Reserve table
       </button>
-    </div>
-  );
-}
-
-function MiniStat({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3.5">
-      <div className="font-display text-xl font-bold text-white">{v}</div>
-      <div className="mt-0.5 text-[11px] text-mist">{k}</div>
     </div>
   );
 }
