@@ -5,7 +5,8 @@ import {
   partnerSessionToken,
   verifyPartnerLogin,
 } from "@/lib/partners";
-import { authGuard } from "@/lib/rate-limit";
+import { audit } from "@/lib/ecosystem/store";
+import { authGuard, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -27,12 +28,14 @@ export async function POST(req: NextRequest) {
     );
 
   const partner = await verifyPartnerLogin(username, password);
-  if (!partner)
+  if (!partner) {
+    await audit(`partner:${username.slice(0, 60)}`, "auth.partner.login.fail", "partner", "", `ip ${clientIp(req)}`);
     return NextResponse.json(
       { error: "Wrong username or password" },
       { status: 401 },
     );
-
+  }
+  await audit(`partner:${partner.username ?? partner.name}`, "auth.partner.login", "partner", partner.id, `ip ${clientIp(req)}`);
   const res = NextResponse.json({
     ok: true,
     partner: {
@@ -42,7 +45,7 @@ export async function POST(req: NextRequest) {
       canEditFinance: canEditAccounts(partner),
     },
   });
-  res.cookies.set(PARTNER_COOKIE, partnerSessionToken(partner.id), {
+  res.cookies.set(PARTNER_COOKIE, partnerSessionToken(partner), {
     httpOnly: true,
     secure: true,
     sameSite: "lax",

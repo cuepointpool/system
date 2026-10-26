@@ -721,6 +721,11 @@ function zeroStats(playerId: string): PlayerStats {
   };
 }
 
+/** A profile view safe to show anyone: contact details removed. */
+export function publicProfileView(view: PlayerProfileView): PlayerProfileView {
+  return { ...view, profile: { ...view.profile, email: null } };
+}
+
 export async function getPlayerProfileView(
   slug: string,
 ): Promise<PlayerProfileView | null> {
@@ -999,11 +1004,15 @@ export interface AuthRow {
   slug: string;
   role: PlayerProfile["role"];
   passwordHash: string | null;
+  sessionVersion: number;
+  /** two-step sign-in is on */
+  totp: boolean;
 }
 
 export async function getAuthByEmail(email: string): Promise<AuthRow | null> {
   const r = await queryOne<Row>(
-    `SELECT id, slug, role, password_hash FROM player_profiles WHERE lower(email) = lower($1)`,
+    `SELECT id, slug, role, password_hash, session_version, (totp_secret IS NOT NULL) AS totp
+       FROM player_profiles WHERE lower(email) = lower($1)`,
     [email],
   );
   return r
@@ -1012,6 +1021,8 @@ export async function getAuthByEmail(email: string): Promise<AuthRow | null> {
         slug: r.slug as string,
         role: r.role as PlayerProfile["role"],
         passwordHash: (r.password_hash as string) ?? null,
+        sessionVersion: Number(r.session_version ?? 0),
+        totp: !!r.totp,
       }
     : null;
 }

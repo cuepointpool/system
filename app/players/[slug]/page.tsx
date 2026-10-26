@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ProfileView } from "@/components/eco/ProfileView";
-import { getPlayerProfileView } from "@/lib/ecosystem/store";
+import { getPlayerProfileView, publicProfileView } from "@/lib/ecosystem/store";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ export default async function PlayerProfilePage({
 
   return (
     <div className="pt-24 sm:pt-28">
-      <ProfileView view={view} />
+      <ProfileView view={publicProfileView(view)} />
     </div>
   );
 }

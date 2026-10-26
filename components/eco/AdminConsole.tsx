@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Tabs } from "./Primitives";
 import { DailyLogTab } from "./DailyLogTab";
 import { AccountsApp } from "./accounts/AccountsApp";
@@ -45,6 +46,7 @@ type Tab =
   | "daily"
   | "finance"
   | "campaign"
+  | "security"
   | "audit";
 
 type VenueTable = {
@@ -167,6 +169,7 @@ export function AdminConsole() {
                 ]
               : []),
             { value: "audit", label: "Audit" },
+            ...(isStaff ? [{ value: "security", label: "Security" }] : []),
           ]}
           value={tab}
           onChange={(v) => setTab(v as Tab)}
@@ -190,7 +193,166 @@ export function AdminConsole() {
           ))}
         {tab === "campaign" && me?.role === "admin" && <CampaignCodeTab />}
         {tab === "audit" && <AuditTab headers={headers} />}
+        {tab === "security" && isStaff && <SecurityTab />}
       </div>
+    </div>
+  );
+}
+
+/* ================= Security: two-step sign-in (staff & admins) ================= */
+
+function SecurityTab() {
+  const router = useRouter();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/me/2fa", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setEnabled(!!d.enabled))
+      .catch(() => setEnabled(null));
+  }, []);
+
+  async function call(body: Record<string, unknown>) {
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch("/api/me/2fa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setMsg({ ok: false, text: d.error || "Could not save" });
+      return null;
+    }
+    return d;
+  }
+
+  async function signOutEverywhere() {
+    if (!window.confirm("Sign out of Cue Point on every device, including this one?")) return;
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ everywhere: true }),
+    });
+    router.push("/account");
+    router.refresh();
+  }
+
+  const codeInput = (
+    <Field label="6-digit code from the app">
+      <input
+        className="input w-40 tracking-[0.3em] tabular-nums"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={6}
+        value={code}
+        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+      />
+    </Field>
+  );
+
+  return (
+    <div className="space-y-6">
+      <Panel title="Two-step sign-in">
+        <p className="mb-4 max-w-xl text-[13px] leading-relaxed text-mist">
+          After your password, sign-in also asks for a 6-digit code from an authenticator app on your phone
+          (Google Authenticator, Microsoft Authenticator, 1Password…). A stolen password alone then can&rsquo;t
+          get into the console or the accounts.
+        </p>
+        <p className="mb-4 text-sm text-white">
+          Status:{" "}
+          <span className={enabled ? "font-semibold text-teal" : "font-semibold text-[#ffc98f]"}>
+            {enabled == null ? "…" : enabled ? "On" : "Off"}
+          </span>
+        </p>
+        <Msg msg={msg} />
+
+        {enabled === false && !setup && (
+          <button
+            disabled={busy}
+            onClick={async () => {
+              const d = await call({ action: "setup" });
+              if (d) setSetup(d);
+            }}
+            className="btn-primary mt-3 px-5 py-2.5 text-sm disabled:opacity-40"
+          >
+            Set up two-step sign-in
+          </button>
+        )}
+
+        {enabled === false && setup && (
+          <div className="mt-3 space-y-4">
+            <ol className="list-decimal space-y-1.5 pl-5 text-[13px] text-mist">
+              <li>Open your authenticator app and add an account.</li>
+              <li>
+                On this phone,{" "}
+                <a href={setup.uri} className="font-medium text-teal underline">
+                  tap here to add it
+                </a>
+                , or choose &ldquo;enter a setup key&rdquo; and type:
+              </li>
+            </ol>
+            <p className="select-all rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm tracking-widest text-white">
+              {setup.secret.match(/.{1,4}/g)?.join(" ")}
+            </p>
+            <p className="text-[13px] text-mist">3. Enter the code the app shows to finish.</p>
+            <div className="flex flex-wrap items-end gap-3">
+              {codeInput}
+              <button
+                disabled={busy || code.length !== 6}
+                onClick={async () => {
+                  const d = await call({ action: "enable", code });
+                  if (d) {
+                    setEnabled(true);
+                    setSetup(null);
+                    setCode("");
+                    setMsg({ ok: true, text: "Two-step sign-in is on. Other devices were signed out." });
+                  }
+                }}
+                className="btn-primary px-5 py-2.5 text-sm disabled:opacity-40"
+              >
+                Turn on
+              </button>
+            </div>
+          </div>
+        )}
+
+        {enabled && (
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            {codeInput}
+            <button
+              disabled={busy || code.length !== 6}
+              onClick={async () => {
+                if (!window.confirm("Turn off two-step sign-in? Your account will be protected by the password only.")) return;
+                const d = await call({ action: "disable", code });
+                if (d) {
+                  setEnabled(false);
+                  setCode("");
+                  setMsg({ ok: true, text: "Two-step sign-in is off." });
+                }
+              }}
+              className="btn-ghost px-5 py-2.5 text-sm disabled:opacity-40"
+            >
+              Turn off
+            </button>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Signed-in devices">
+        <p className="mb-4 max-w-xl text-[13px] leading-relaxed text-mist">
+          Lost a phone, or signed in on a shared computer? End every session on your account at once.
+        </p>
+        <button onClick={signOutEverywhere} className="btn-ghost px-5 py-2.5 text-sm">
+          Sign out all devices
+        </button>
+      </Panel>
     </div>
   );
 }

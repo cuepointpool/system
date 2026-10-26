@@ -36,31 +36,38 @@ export function verifyPassword(password: string, stored: string): boolean {
   return test.length === known.length && timingSafeEqual(test, known);
 }
 
-/* ---- session token: "<playerId>.<expiresAt>.<hmac>" ---- */
+/* ---- session token: "<id>.<expiresAt>.<version>.<hmac>" ----
+   `version` is the account's session_version when the token was issued.
+   Bumping that column (password change, "sign out everywhere", 2FA on)
+   invalidates every token issued before it. Tokens issued before
+   versioning ("<id>.<expiresAt>.<hmac>") count as version 0. */
 
 function sign(payload: string): string {
   return createHmac("sha256", SECRET).update(payload).digest("base64url");
 }
 
-export function createSessionToken(playerId: string): string {
+export function createSessionToken(id: string, version = 0): string {
   const exp = Date.now() + SESSION_MAX_AGE * 1000;
-  const payload = `${playerId}.${exp}`;
+  const payload = `${id}.${exp}.${version}`;
   return `${payload}.${sign(payload)}`;
 }
 
-export function readSessionToken(token: string | undefined): string | null {
+/** The account id + session version a valid, unexpired token was issued for. */
+export function readSession(token: string | undefined): { id: string; version: number } | null {
   if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [playerId, expStr, mac] = parts;
-  const payload = `${playerId}.${expStr}`;
-  const expected = sign(payload);
+  if (parts.length !== 3 && parts.length !== 4) return null;
+  const mac = parts.pop()!;
+  const expected = sign(parts.join("."));
   if (
     mac.length !== expected.length ||
     !timingSafeEqual(Buffer.from(mac), Buffer.from(expected))
   ) {
     return null;
   }
-  if (Number(expStr) < Date.now()) return null;
-  return playerId;
+  const [id, expStr, verStr = "0"] = parts;
+  if (!(Number(expStr) >= Date.now())) return null;
+  const version = Number(verStr);
+  if (!Number.isInteger(version) || version < 0) return null;
+  return { id, version };
 }

@@ -9,15 +9,33 @@
 
 import { cookies, headers } from "next/headers";
 import type { NextRequest } from "next/server";
-import { readSessionToken, SESSION_COOKIE } from "../auth";
+import { readSession, SESSION_COOKIE } from "../auth";
+import { query, queryOne } from "../pg";
 import { getPlayerById } from "./store";
 import type { PlayerProfile } from "./types";
 
 export async function getViewer(): Promise<PlayerProfile | null> {
   const store = await cookies();
-  const playerId = readSessionToken(store.get(SESSION_COOKIE)?.value);
-  if (!playerId) return null;
-  return (await getPlayerById(playerId)) ?? null;
+  const s = readSession(store.get(SESSION_COOKIE)?.value);
+  if (!s) return null;
+  // a token from before the last "sign out everywhere" / password change is dead
+  if ((await playerSessionVersion(s.id)) !== s.version) return null;
+  return (await getPlayerById(s.id)) ?? null;
+}
+
+/** Current session version of a player (null if the player doesn't exist). */
+export async function playerSessionVersion(id: string): Promise<number | null> {
+  const r = await queryOne<{ v: number }>(`SELECT session_version AS v FROM player_profiles WHERE id = $1`, [id]);
+  return r ? Number(r.v) : null;
+}
+
+/** Invalidate every session a player has; returns the new version. */
+export async function bumpPlayerSessions(id: string): Promise<number> {
+  const rows = await query<{ v: number }>(
+    `UPDATE player_profiles SET session_version = session_version + 1 WHERE id = $1 RETURNING session_version AS v`,
+    [id],
+  );
+  return Number(rows[0]?.v ?? 0);
 }
 
 export async function isStaffViewer(): Promise<boolean> {
@@ -37,9 +55,7 @@ export async function canStaff(req?: NextRequest): Promise<boolean> {
     return process.env.NODE_ENV !== "production";
   }
   const provided = req
-    ? req.headers.get("x-staff-key") ||
-      new URL(req.url).searchParams.get("key") ||
-      ""
+    ? req.headers.get("x-staff-key") || ""
     : (await headers()).get("x-staff-key") || "";
   return provided === STAFF_KEY;
 }

@@ -730,3 +730,40 @@ ALTER TABLE friend_tournaments ADD COLUMN IF NOT EXISTS poster TEXT;
 ALTER TABLE friend_tournaments DROP CONSTRAINT IF EXISTS friend_tournaments_capacity_teams_check;
 ALTER TABLE friend_tournaments ADD CONSTRAINT friend_tournaments_capacity_teams_check
   CHECK (capacity_teams BETWEEN 2 AND 1024);
+
+-- ====================================================================
+-- Security (also db/migrations/2026-10-28-security.sql; the ownership
+-- hand-over to postgres for the log tables is in the migration only)
+-- ====================================================================
+-- 1. Revocable sign-ins: a session token carries the account's version;
+--    bumping it (password change, "sign out all devices", 2FA on) ends
+--    every older session.
+ALTER TABLE player_profiles   ADD COLUMN IF NOT EXISTS session_version INT NOT NULL DEFAULT 0;
+ALTER TABLE business_partners ADD COLUMN IF NOT EXISTS session_version INT NOT NULL DEFAULT 0;
+
+-- 2. Two-step sign-in (authenticator app codes)
+ALTER TABLE player_profiles ADD COLUMN IF NOT EXISTS totp_secret    TEXT;    -- active secret (base32)
+ALTER TABLE player_profiles ADD COLUMN IF NOT EXISTS totp_pending   TEXT;    -- during setup
+ALTER TABLE player_profiles ADD COLUMN IF NOT EXISTS totp_last_step BIGINT;  -- replay guard
+
+-- 3. Append-only audit trail: rows can be added and read, never changed or removed.
+CREATE OR REPLACE FUNCTION forbid_audit_change() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log;
+CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE ON audit_log
+  FOR EACH ROW EXECUTE FUNCTION forbid_audit_change();
+DROP TRIGGER IF EXISTS audit_log_no_truncate ON audit_log;
+CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON audit_log
+  FOR EACH STATEMENT EXECUTE FUNCTION forbid_audit_change();
+
+DROP TRIGGER IF EXISTS acct_entry_log_append_only ON acct_entry_log;
+CREATE TRIGGER acct_entry_log_append_only BEFORE UPDATE OR DELETE ON acct_entry_log
+  FOR EACH ROW EXECUTE FUNCTION forbid_audit_change();
+DROP TRIGGER IF EXISTS acct_entry_log_no_truncate ON acct_entry_log;
+CREATE TRIGGER acct_entry_log_no_truncate BEFORE TRUNCATE ON acct_entry_log
+  FOR EACH STATEMENT EXECUTE FUNCTION forbid_audit_change();
+

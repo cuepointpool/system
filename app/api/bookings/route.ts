@@ -7,15 +7,15 @@ import {
   createBooking,
   listBookings,
 } from "@/lib/db";
-import { getViewer } from "@/lib/ecosystem/identity";
+import { getViewer, staffActor } from "@/lib/ecosystem/identity";
 import { getTableById } from "@/lib/tables";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const key = process.env.ADMIN_KEY;
-  if (key && req.headers.get("x-admin-key") !== key) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // every booking carries the customer's name, phone and email — staff only
+  if (!(await staffActor(req))) {
+    return NextResponse.json({ error: "Staff only" }, { status: 401 });
   }
   try {
     const bookings = await listBookings();

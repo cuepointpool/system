@@ -381,6 +381,7 @@ export async function listBookings(
     limit?: number;
   } = {},
 ): Promise<Booking[]> {
+  await purgeOldBookingContacts();
   const where: string[] = [];
   const vals: unknown[] = [];
   if (opts.date) {
@@ -401,6 +402,32 @@ export async function listBookings(
     vals,
   );
   return rows.map(rowToBooking);
+}
+
+/** How long a booking keeps the customer's contact details. */
+export const BOOKING_CONTACT_RETENTION_MONTHS = 12;
+let lastPurge = 0;
+
+/**
+ * Data retention: a year after the booking date the customer's name, phone,
+ * email and notes are wiped. The booking itself (table, time, amount) stays
+ * for the records. Runs at most every 12 hours, piggy-backed on staff reads.
+ */
+export async function purgeOldBookingContacts(force = false): Promise<number> {
+  const now = Date.now();
+  if (!force && now - lastPurge < 12 * 60 * 60 * 1000) return 0;
+  lastPurge = now;
+  const rows = await query<{ id: string }>(
+    `UPDATE bookings
+        SET customer_name = 'Guest', phone = '', email = NULL, notes = NULL
+      WHERE date < (CURRENT_DATE - make_interval(months => $1))
+        AND (customer_name <> 'Guest' OR phone <> '' OR email IS NOT NULL OR notes IS NOT NULL)
+      RETURNING id`,
+    [BOOKING_CONTACT_RETENTION_MONTHS],
+  );
+  if (rows.length)
+    await audit("system", "booking.retention.purge", "booking", "", `${rows.length} bookings' contact details removed`);
+  return rows.length;
 }
 
 export async function getBookingById(id: string): Promise<Booking | null> {

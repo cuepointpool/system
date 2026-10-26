@@ -20,7 +20,7 @@ import {
   PARTNER_COOKIE,
   createSessionToken,
   hashPassword,
-  readSessionToken,
+  readSession,
   verifyPassword,
 } from "./auth";
 import { adminActor } from "./ecosystem/identity";
@@ -60,6 +60,8 @@ export interface PartnerAccount {
   active: boolean;
   hasLogin: boolean;
   canEditAccounts: boolean;
+  /** bumped on password change: older sign-ins stop working */
+  sessionVersion: number;
 }
 
 interface PartnerRow {
@@ -70,6 +72,7 @@ interface PartnerRow {
   positions: string[] | null;
   active: boolean;
   can_edit_accounts: boolean | null;
+  session_version: number | null;
 }
 
 const toAccount = (r: PartnerRow): PartnerAccount => ({
@@ -80,6 +83,7 @@ const toAccount = (r: PartnerRow): PartnerAccount => ({
   active: r.active,
   hasLogin: !!r.username && !!r.password_hash,
   canEditAccounts: !!r.can_edit_accounts,
+  sessionVersion: Number(r.session_version ?? 0),
 });
 
 /** May this investor add, correct or delete accounting entries? (admin-granted) */
@@ -108,17 +112,17 @@ export async function getPartnerAccountById(
 
 /* ------------------------------- session ------------------------------- */
 
-export function partnerSessionToken(id: string): string {
-  return createSessionToken(id);
+export function partnerSessionToken(a: PartnerAccount): string {
+  return createSessionToken(a.id, a.sessionVersion);
 }
 
 /** The partner making this request, from the `cp_partner` cookie. */
 export async function partnerViewer(): Promise<PartnerAccount | null> {
   const store = await cookies();
-  const id = readSessionToken(store.get(PARTNER_COOKIE)?.value);
-  if (!id || !id.startsWith("bp_")) return null;
-  const acct = await getPartnerAccountById(id);
-  return acct && acct.active ? acct : null;
+  const s = readSession(store.get(PARTNER_COOKIE)?.value);
+  if (!s || !s.id.startsWith("bp_")) return null;
+  const acct = await getPartnerAccountById(s.id);
+  return acct && acct.active && acct.sessionVersion === s.version ? acct : null;
 }
 
 export async function verifyPartnerLogin(
@@ -173,6 +177,8 @@ export async function setPartnerAccess(
   if (patch.password) {
     vals.push(hashPassword(String(patch.password)));
     sets.push(`password_hash = $${vals.length}`);
+    // a new password signs the investor out everywhere
+    sets.push(`session_version = session_version + 1`);
   }
   if (patch.positions !== undefined) {
     vals.push(cleanPositions(patch.positions));

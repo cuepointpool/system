@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPlayerProfileView } from "@/lib/ecosystem/store";
+import { getPlayerProfileView, publicProfileView } from "@/lib/ecosystem/store";
 
 export const dynamic = "force-dynamic";
 
@@ -12,5 +12,5 @@ export async function GET(
   if (!view) {
     return NextResponse.json({ error: "Player not found" }, { status: 404 });
   }
-  return NextResponse.json(view);
+  return NextResponse.json(publicProfileView(view));
 }

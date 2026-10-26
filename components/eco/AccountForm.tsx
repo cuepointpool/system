@@ -26,6 +26,9 @@ export function AccountForm({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // two-step sign-in: asked for after a correct password
+  const [needCode, setNeedCode] = useState(false);
+  const [code, setCode] = useState("");
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -49,7 +52,7 @@ export function AccountForm({
         ? { username: id, password: form.password }
         : mode === "join"
           ? form
-          : { email: id, password: form.password };
+          : { email: id, password: form.password, ...(needCode ? { code } : {}) };
 
       const res = await fetch(url, {
         method: "POST",
@@ -57,6 +60,7 @@ export function AccountForm({
         body: JSON.stringify(body),
       });
       const data = await res.json();
+      if (data.needCode) setNeedCode(true);
       if (!res.ok) throw new Error(data.error || "Something went wrong");
       router.push(partnerLogin ? "/partners" : nextPath);
       router.refresh();
@@ -154,6 +158,20 @@ export function AccountForm({
             placeholder={mode === "join" ? "At least 8 characters" : "••••••••"}
           />
         </Field>
+        {needCode && mode === "signin" && (
+          <Field label="Authenticator code" hint="6 digits from your app">
+            <input
+              className="input tracking-[0.3em] tabular-nums"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="123456"
+            />
+          </Field>
+        )}
 
         {error && (
           <p className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">
