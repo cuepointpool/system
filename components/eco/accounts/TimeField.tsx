@@ -4,10 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { cn, label12h } from "@/lib/utils";
 
 /* A tap-friendly time picker for the day book: one tap for the hour,
-   one for the minutes. Hours run across the business day (10 AM → 2 AM).
+   one for the minutes. Hours run across the business day, 12 PM through
+   the night to 6 AM (6:00 AM itself is offered as the latest out time).
    Value is "HH:MM" (24h), same as <input type="time">. */
 
-const HOURS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2];
+const HOURS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5];
+/** Closing time: an out time can be exactly 6:00 AM, nothing later. */
+const CLOSE_HOUR = 6;
 const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 /** Quick lengths offered on the out-time picker, in minutes after the in time. */
 const QUICK = [30, 60, 90, 120, 180];
@@ -119,11 +122,11 @@ export function TimeField({
 
           <p className="mb-1.5 text-[10px] uppercase tracking-wide text-mist">Hour</p>
           <div className="grid grid-cols-6 gap-1">
-            {HOURS.map((hr) => (
+            {(from ? [...HOURS, CLOSE_HOUR] : HOURS).map((hr) => (
               <button
                 key={hr}
                 type="button"
-                onClick={() => pick(`${pad(hr)}:${pad(m ?? 0)}`)}
+                onClick={() => pick(`${pad(hr)}:${pad(hr === CLOSE_HOUR ? 0 : (m ?? 0))}`)}
                 className={cn(
                   "rounded-lg py-2 text-xs font-medium tabular-nums transition",
                   h === hr ? "bg-teal text-navy-950" : "bg-white/[0.05] text-white/85 hover:bg-white/10",
@@ -140,7 +143,7 @@ export function TimeField({
               <button
                 key={mn}
                 type="button"
-                disabled={h === null}
+                disabled={h === null || (h === CLOSE_HOUR && mn !== 0)}
                 onClick={() => pick(`${pad(h!)}:${pad(mn)}`, true)}
                 className={cn(
                   "rounded-lg py-2 text-xs font-medium tabular-nums transition disabled:opacity-30",

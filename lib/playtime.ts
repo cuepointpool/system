@@ -50,7 +50,8 @@ export function sessionMinutes(start: string, end: string): number | null {
   let s = timeToMinutes(start);
   let e = timeToMinutes(end);
   if (s < DAY_ROLLOVER_MIN) s += 1440;
-  if (e < DAY_ROLLOVER_MIN) e += 1440;
+  // closing time (6:00 AM) still ends the night it started in
+  if (e <= DAY_ROLLOVER_MIN) e += 1440;
   const mins = e - s;
   return mins > 0 && mins <= MAX_SESSION_MIN ? mins : null;
 }
