@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Tabs } from "./Primitives";
-import { DailyLogTab } from "./DailyLogTab";
 import { AccountsApp } from "./accounts/AccountsApp";
 import type { OfficialListItem } from "@/lib/friends/types";
 import { cn, formatDateShort, label12h, timeAgo } from "@/lib/utils";
@@ -41,7 +40,6 @@ type Tab =
   | "membership"
   | "tables"
   | "bookings"
-  | "daily"
   | "finance"
   | "campaign"
   | "security"
@@ -159,7 +157,6 @@ export function AdminConsole() {
             { value: "membership", label: "Membership" },
             { value: "tables", label: "Tables" },
             { value: "bookings", label: "Bookings" },
-            { value: "daily", label: "Daily log" },
             ...(me?.role === "admin"
               ? [
                   { value: "finance", label: "Accounts" },
@@ -182,7 +179,6 @@ export function AdminConsole() {
         {tab === "membership" && <MembershipTab headers={headers} isAdmin={me?.role === "admin"} />}
         {tab === "tables" && <TablesTab headers={headers} />}
         {tab === "bookings" && <BookingsTab headers={headers} />}
-        {tab === "daily" && <DailyLogTab headers={headers} isAdmin={me?.role === "admin"} />}
         {tab === "finance" &&
           (me?.role === "admin" ? (
             <AccountsApp headers={headers} />
