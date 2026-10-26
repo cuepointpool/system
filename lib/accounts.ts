@@ -199,7 +199,7 @@ export async function listEntries(
     vals.push(opts.kind);
     where.push(`e.kind = $${vals.length}`);
   }
-  vals.push(Math.min(5000, Math.max(1, opts.limit ?? 2000)));
+  vals.push(Math.min(50000, Math.max(1, opts.limit ?? 2000)));
   const rows = await query<EntryRow>(
     `${ENTRY_SELECT}
      ${where.length ? "WHERE " + where.join(" AND ") : ""}
@@ -310,6 +310,10 @@ function clean(input: EntryInput) {
   if (!DATE_RE.test(input.date)) throw new AccountsError("Pick a valid date");
   if (!(ENTRY_KINDS as readonly string[]).includes(input.kind))
     throw new AccountsError("Unknown entry type");
+  // the books run up to today; a future date would show in balances before it happens
+  if (input.date > todayLK()) throw new AccountsError("Entries can't be dated in the future");
+  if ((input.kind === "capital" || input.kind === "drawing") && !input.partnerId)
+    throw new AccountsError("Pick the investor");
   let cash = Math.max(0, int(input.cash));
   let bank = Math.max(0, int(input.bank));
   // transfers move one amount between the two accounts
@@ -533,6 +537,7 @@ export async function setCashBox(
   actor: string,
 ): Promise<CashDay> {
   if (!DATE_RE.test(input.date)) throw new AccountsError("Pick a valid date");
+  if (input.date > todayLK()) throw new AccountsError("You can't close a day that hasn't happened yet");
   const amount = input.amount == null ? null : Math.max(0, int(input.amount));
   const note = (input.note ?? "").trim().slice(0, 200);
   const [amt, noteCol, by, at] =
@@ -570,11 +575,24 @@ export interface StaffLogLine {
   customer: string;
 }
 
+/**
+ * The cash box opening float. Nobody types it: it is the previous counted
+ * close carried forward (plus any cash movement on days nobody closed in
+ * between), or on the very first day the starting cash balance.
+ */
+export interface CashOpening {
+  amount: number;
+  source: "close" | "start";
+  closeDate: string | null; // the close it was carried from
+  gap: boolean; // true when that close wasn't the day before
+}
+
 export interface DayBook {
   date: string;
   entries: Entry[];
   cashDay: CashDay | null;
   previousClose: CashDay | null;
+  cashOpening: CashOpening;
   start: Balances; // ledger balances before this day
   end: Balances; // after this day
   staffLog: StaffLogLine[]; // the staff daily play log, for cross-checking
@@ -605,11 +623,28 @@ export async function dayBook(date: string): Promise<DayBook> {
       [date],
     ).catch(() => []),
   ]);
+  let cashOpening: CashOpening;
+  if (prev) {
+    // cash that moved on unclosed days between that close and today
+    const atClose = await balances({ upto: prev.date });
+    const dayBefore = new Date(Date.parse(date + "T00:00:00Z") - 86_400_000).toISOString().slice(0, 10);
+    cashOpening = {
+      amount: (prev.closing ?? 0) + (start.cash - atClose.cash),
+      source: "close",
+      closeDate: prev.date,
+      gap: prev.date !== dayBefore,
+    };
+  } else {
+    // first day in the books: the starting cash recorded that day
+    const openingCash = entries.filter((e) => e.kind === "opening").reduce((s, e) => s + e.cash, 0);
+    cashOpening = { amount: start.cash + openingCash, source: "start", closeDate: null, gap: false };
+  }
   return {
     date,
     entries: entries.reverse(), // oldest first reads like a day book
     cashDay,
     previousClose: prev,
+    cashOpening,
     start,
     end,
     staffLog: logs.map((l) => ({

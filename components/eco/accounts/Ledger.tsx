@@ -72,7 +72,7 @@ export function Ledger() {
     const needle = q.trim().toLowerCase();
     const list = [...(data?.entries ?? [])]
       // ledgers read oldest first
-      .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
       .filter((e) => {
         const { dr, cr } = drCr(e, book);
         if (!dr && !cr) return false;
@@ -166,8 +166,8 @@ export function Ledger() {
         />
       </div>
       <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
-        <input type="date" value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} className="input h-9 text-xs" aria-label="From" />
-        <input type="date" value={to} onChange={(e) => e.target.value && setTo(e.target.value)} className="input h-9 text-xs" aria-label="To" />
+        <input type="date" value={from} max={to} onChange={(e) => e.target.value && e.target.value <= to && setFrom(e.target.value)} className="input h-9 text-xs" aria-label="From" />
+        <input type="date" value={to} min={from} onChange={(e) => e.target.value && e.target.value >= from && setTo(e.target.value)} className="input h-9 text-xs" aria-label="To" />
         <select value={kind} onChange={(e) => setKind(e.target.value)} className="input h-9 text-xs">
           <option value="">All types</option>
           {ENTRY_KINDS.map((k) => (

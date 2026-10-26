@@ -50,6 +50,7 @@ type DayData = {
   entries: Entry[];
   cashDay: CashDay | null;
   previousClose: CashDay | null;
+  cashOpening: { amount: number; source: "close" | "start"; closeDate: string | null; gap: boolean };
   start: Balances;
   end: Balances;
   staffLog: StaffLogLine[];
@@ -736,39 +737,30 @@ function CashBox({ day }: { day: DayData }) {
   const { meta } = useAccounts();
   const canEdit = meta.access.canEdit;
   const { send, busy, error } = useSend();
-  const suggestedOpen = day.cashDay?.opening ?? day.previousClose?.closing ?? day.start.cash;
-  const [open, setOpen] = useState(String(suggestedOpen));
   const [close, setClose] = useState(day.cashDay?.closing != null ? String(day.cashDay.closing) : "");
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    setOpen(String(day.cashDay?.opening ?? day.previousClose?.closing ?? day.start.cash));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setClose(day.cashDay?.closing != null ? String(day.cashDay.closing) : "");
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [day.date, day.cashDay?.opening, day.cashDay?.closing, day.previousClose?.closing, day.start.cash]);
+  }, [day.date, day.cashDay?.closing]);
 
   const t = dayTotals(day.entries);
-  const opening = day.cashDay?.opening ?? null;
-  const base = opening ?? day.start.cash;
-  const expected = base + t.cashNet;
+  const op = day.cashOpening;
+  const expected = op.amount + t.cashNet;
   const counted = day.cashDay?.closing ?? null;
   const variance = counted == null ? null : counted - expected;
-  const status = counted != null ? "Closed" : opening != null ? "Open" : "Not opened";
+  const status = counted != null ? "Closed" : "Open";
 
   return (
     <Card
       className="h-fit"
       title="Cash box"
-      sub="Count the drawer when you open and when you close."
+      sub="Opening is carried from the last close. Count the drawer at the end of the day."
       action={
         <span
           className={cn(
             "rounded-full px-2.5 py-1 text-[10px] font-medium",
-            status === "Closed"
-              ? "bg-teal/15 text-teal"
-              : status === "Open"
-                ? "bg-amber-400/15 text-amber-200"
-                : "bg-white/10 text-mist",
+            status === "Closed" ? "bg-teal/15 text-teal" : "bg-amber-400/15 text-amber-200",
           )}
         >
           {status}
@@ -778,36 +770,28 @@ function CashBox({ day }: { day: DayData }) {
       <div className="space-y-4">
         <div>
           <Label>Opening balance</Label>
-          <div className="flex gap-2">
-            <input
-              inputMode="numeric"
-              disabled={!canEdit}
-              value={open}
-              onChange={(e) => setOpen(e.target.value.replace(/[^\d]/g, ""))}
-              className="input h-10 tabular-nums"
-            />
-            {canEdit && (
-              <button
-                disabled={busy || open === ""}
-                onClick={() => send("POST", { action: "cashbox", phase: "open", date: day.date, amount: Number(open) })}
-                className="btn-ghost shrink-0 px-4 text-xs disabled:opacity-40"
-              >
-                {opening == null ? "Open day" : "Update"}
-              </button>
-            )}
+          <div className="flex h-10 items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3.5">
+            <Money v={op.amount} className="font-display text-base font-semibold text-white" />
+            <span className="text-[11px] text-mist" title="Set automatically — can't be edited">
+              🔒 locked
+            </span>
           </div>
           <p className="mt-1 text-[11px] text-mist">
-            {day.previousClose
-              ? `Last close: LKR ${fmt(day.previousClose.closing ?? 0)} on ${shortDate(day.previousClose.date)}`
-              : "No earlier close recorded."}
-            {opening != null && opening !== day.start.cash && !day.entries.some((e) => e.kind === "opening") && (
-              <span className="text-amber-200"> · books say LKR {fmt(day.start.cash)}</span>
+            {op.source === "start" ? (
+              "Starting cash balance — the first day in the books."
+            ) : op.gap ? (
+              <span className="text-amber-200">
+                Last close was {shortDate(op.closeDate!)} (LKR {fmt(day.previousClose?.closing ?? 0)}), plus cash movements on the
+                days in between that weren&apos;t closed.
+              </span>
+            ) : (
+              `Closing balance of ${shortDate(op.closeDate!)}, carried forward.`
             )}
           </p>
         </div>
 
         <div className="rounded-xl border border-white/[0.07] bg-black/20 p-3.5 text-xs">
-          <Row k={opening != null ? "Opening (counted)" : "Opening (books)"} v={base} />
+          <Row k="Opening" v={op.amount} />
           <Row k="+ Cash income" v={t.incomeCash} />
           <Row k="− Cash expenses" v={-t.expenseCash} />
           <Row k="± Deposits, withdrawals, investors" v={t.cashNet - t.incomeCash + t.expenseCash} />

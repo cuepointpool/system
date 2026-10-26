@@ -96,6 +96,8 @@ export async function GET(req: NextRequest) {
             kind: (ENTRY_KINDS as readonly string[]).includes(kind ?? "")
               ? (kind as EntryKind)
               : undefined,
+            // a running balance needs every entry in the range, not just the latest
+            limit: 50000,
           }),
           // balance brought forward into the range
           from ? balances({ before: from }) : Promise.resolve({ cash: 0, bank: 0 }),
@@ -116,7 +118,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   try {
     if (body.action === "cashbox") {
-      if (body.phase !== "open" && body.phase !== "close") return fail("Open or close?");
+      // the opening float is always the previous day's close — never entered by hand
+      if (body.phase !== "close")
+        return fail("The opening balance is carried from the previous day's closing balance");
       const cashDay = await setCashBox(
         {
           date: String(body.date ?? ""),
