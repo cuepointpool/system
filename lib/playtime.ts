@@ -21,6 +21,17 @@ export const MAX_SESSION_MIN = 12 * 60;
 /** Times before this are past midnight and belong to the previous business day. */
 const DAY_ROLLOVER_MIN = 6 * 60;
 
+/**
+ * The business day a moment belongs to, YYYY-MM-DD (Sri Lanka time). The
+ * venue trades 12 PM to 6 AM, so anything before 6 AM — a game that ends
+ * at 3 AM, or the night's books entered at 1 AM — counts as the previous date.
+ */
+export function businessDate(now = Date.now()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(
+    new Date(now - DAY_ROLLOVER_MIN * 60_000),
+  );
+}
+
 export function freeMinutesEarned(paidMin: number): number {
   return Math.floor(Math.max(0, paidMin) / FREE_EVERY_MIN) * FREE_REWARD_MIN;
 }

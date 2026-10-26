@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn, formatLKR, label12h, minutesToTime, timeToMinutes } from "@/lib/utils";
 import {
   FREE_EVERY_MIN,
+  businessDate,
   FREE_REWARD_MIN,
   formatMinutes,
   quoteSession,
@@ -22,11 +23,8 @@ import type { DayReservation, PlayLog } from "@/lib/play-logs";
 type TableLite = { id: string; label: string };
 type PlayerLite = { id: string; fullName: string; nickname: string };
 
-function today() {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
+// the business day: before 6 AM the log is still on the previous night
+const today = () => businessDate();
 
 export function DailyLogTab({
   headers,

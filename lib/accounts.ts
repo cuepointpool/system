@@ -1,6 +1,7 @@
 import { audit, rid } from "./ecosystem/store";
 import { query } from "./pg";
 import { ENTRY_KINDS, type EntryKind } from "./accounts-categories";
+import { businessDate } from "./playtime";
 
 /* ------------------------------------------------------------------
    Accounting — raw SQL against Postgres (see db/schema.sql).
@@ -13,11 +14,9 @@ import { ENTRY_KINDS, type EntryKind } from "./accounts-categories";
    what the ledger says should be there.
    ------------------------------------------------------------------ */
 
-const TZ = "Asia/Colombo";
-
-/** Today's date in Sri Lanka, YYYY-MM-DD. */
+/** Today's business day, YYYY-MM-DD: before 6 AM it is still the previous night's date. */
 export function todayLK(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date());
+  return businessDate();
 }
 
 const int = (v: unknown): number => Math.trunc(Number(v) || 0);
