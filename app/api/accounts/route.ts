@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminActor } from "@/lib/ecosystem/identity";
-import { accountsEditor, accountsViewer } from "@/lib/partners";
+import { accountsEditor, accountsViewer, partnerViewer } from "@/lib/partners";
 import { listTables } from "@/lib/tables";
 import {
   AccountsError,
   addEntry,
+  balances,
   dayBook,
   deleteEntry,
   listEntries,
@@ -45,15 +46,23 @@ export async function GET(req: NextRequest) {
   try {
     switch (view) {
       case "meta": {
-        const [isAdmin, canEdit, partners, tables] = await Promise.all([
+        const [isAdmin, canEdit, partners, tables, partner] = await Promise.all([
           adminActor(req),
           accountsEditor(req),
           listPartners(),
           listTables(),
+          partnerViewer(),
         ]);
         return NextResponse.json({
           today: todayLK(),
-          access: { isAdmin: !!isAdmin, canEdit: !!canEdit },
+          access: {
+            isAdmin: !!isAdmin,
+            canEdit: !!canEdit,
+            // the signed-in investor (null for admins)
+            partnerId: isAdmin ? null : (partner?.id ?? null),
+            // the treasurer prepares statements for sign-off
+            canSubmitStatements: !!isAdmin || !!partner?.positions.includes("treasurer"),
+          },
           partners: partners
             .filter((p) => isAdmin || p.active)
             .map((p) =>
@@ -79,14 +88,19 @@ export async function GET(req: NextRequest) {
       }
       case "ledger": {
         const kind = sp.get("kind");
-        const entries = await listEntries({
-          from: sp.get("from") && DATE_RE.test(sp.get("from")!) ? sp.get("from")! : undefined,
-          to: sp.get("to") && DATE_RE.test(sp.get("to")!) ? sp.get("to")! : undefined,
-          kind: (ENTRY_KINDS as readonly string[]).includes(kind ?? "")
-            ? (kind as EntryKind)
-            : undefined,
-        });
-        return NextResponse.json({ entries });
+        const from = sp.get("from") && DATE_RE.test(sp.get("from")!) ? sp.get("from")! : undefined;
+        const [entries, opening] = await Promise.all([
+          listEntries({
+            from,
+            to: sp.get("to") && DATE_RE.test(sp.get("to")!) ? sp.get("to")! : undefined,
+            kind: (ENTRY_KINDS as readonly string[]).includes(kind ?? "")
+              ? (kind as EntryKind)
+              : undefined,
+          }),
+          // balance brought forward into the range
+          from ? balances({ before: from }) : Promise.resolve({ cash: 0, bank: 0 }),
+        ]);
+        return NextResponse.json({ entries, opening });
       }
       default:
         return fail("Unknown view");

@@ -47,7 +47,7 @@ const TONE = {
 const VERB = { create: "Added", edit: "Edited", delete: "Deleted" };
 
 /** "partner:isuru" → "isuru · investor"; anything else is an admin. */
-function who(actor: string) {
+export function who(actor: string) {
   if (actor.startsWith("partner:")) return { name: actor.slice(8), role: "investor" };
   if (actor === "admin-key") return { name: "staff key", role: "admin" };
   if (actor === "opening-setup") return { name: "opening setup", role: "system" };

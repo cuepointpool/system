@@ -2,26 +2,13 @@
 
 import { Fragment, useState } from "react";
 import { cn } from "@/lib/utils";
-import { TABLE_INCOME, expenseGroup, type EntryKind } from "@/lib/accounts-categories";
-import { Seg, Toggle, addDays, fmt, longDate, useAccounts, useView, type Balances, type Investor } from "./ui";
-
-type Line = {
-  kind: EntryKind;
-  category: string;
-  tableName: string | null;
-  partnerId: string | null;
-  cash: number;
-  bank: number;
-  count: number;
-};
-type ReportData = {
-  from: string;
-  to: string;
-  opening: Balances;
-  closing: Balances;
-  period: Line[];
-  cumulative: Line[];
-};
+import { TABLE_INCOME, type EntryKind } from "@/lib/accounts-categories";
+import {
+  balanceSheetFigures,
+  profitFigures,
+  type ReportData,
+} from "@/lib/accounts-reports";
+import { Seg, Toggle, addDays, fmt, longDate, useAccounts, useView, type Investor } from "./ui";
 
 type Kind = "pl" | "cf" | "bs";
 type Preset = "month" | "last" | "year" | "all" | "custom";
@@ -145,7 +132,7 @@ function periodFor(p: Preset, today: string, custom: { from: string; to: string 
 
 /* ------------------------------ paper shell ------------------------------ */
 
-function Paper({
+export function Paper({
   title,
   data,
   kind,
@@ -250,36 +237,7 @@ function Doc({ children }: { children: React.ReactNode }) {
   );
 }
 
-const amt = (l: Line) => l.cash + l.bank;
-
-/** Sum lines by category (optionally only some kinds). */
-function byCategory(lines: Line[], kind: EntryKind) {
-  const m = new Map<string, number>();
-  for (const l of lines) if (l.kind === kind) m.set(l.category || "Uncategorised", (m.get(l.category || "Uncategorised") ?? 0) + amt(l));
-  return [...m.entries()].sort((a, b) => b[1] - a[1]);
-}
-
 /* ------------------------------ P&L ------------------------------ */
-
-function profitFigures(lines: Line[], taxRate: number) {
-  const income = byCategory(lines, "income");
-  const tables = new Map<string, number>();
-  for (const l of lines)
-    if (l.kind === "income" && l.category === TABLE_INCOME)
-      tables.set(l.tableName ?? "Tables", (tables.get(l.tableName ?? "Tables") ?? 0) + amt(l));
-  const expenses = byCategory(lines, "expense");
-  const cogs = expenses.filter(([c]) => expenseGroup(c) === "cogs");
-  // with tax on, "Tax paid" settles the provision instead of being a running cost
-  const opex = expenses.filter(([c]) => expenseGroup(c) === "opex" || (!taxRate && expenseGroup(c) === "tax"));
-  const taxPaid = expenses.filter(([c]) => expenseGroup(c) === "tax").reduce((s, [, v]) => s + v, 0);
-  const revenue = income.reduce((s, [, v]) => s + v, 0);
-  const cogsT = cogs.reduce((s, [, v]) => s + v, 0);
-  const opexT = opex.reduce((s, [, v]) => s + v, 0);
-  const gross = revenue - cogsT;
-  const beforeTax = gross - opexT;
-  const taxProvision = taxRate ? Math.round((Math.max(0, beforeTax) * taxRate) / 100) : 0;
-  return { income, tables, cogs, opex, revenue, cogsT, opexT, gross, beforeTax, taxProvision, taxPaid, net: beforeTax - taxProvision };
-}
 
 function ProfitLoss({ data, taxRate, investors }: { data: ReportData; taxRate: number; investors: Investor[] }) {
   const f = profitFigures(data.period, taxRate);
@@ -449,18 +407,8 @@ function CashFlow({ data }: { data: ReportData }) {
 
 /* ------------------------------ balance sheet ------------------------------ */
 
-function BalanceSheet({ data, taxRate, investors }: { data: ReportData; taxRate: number; investors: Investor[] }) {
-  const cum = data.cumulative;
-  const sum = (k: EntryKind) => cum.filter((l) => l.kind === k).reduce((s, l) => s + amt(l), 0);
-  const f = profitFigures(cum, taxRate);
-  const taxPayable = taxRate ? f.taxProvision - f.taxPaid : 0;
-  const assets = data.closing.cash + data.closing.bank;
-  const opening = sum("opening");
-  const capital = sum("capital");
-  const drawings = sum("drawing");
-  const retained = f.net;
-  const equity = opening + capital + retained - drawings;
-  const balanced = equity + taxPayable === assets;
+export function BalanceSheet({ data, taxRate, investors }: { data: ReportData; taxRate: number; investors: Investor[] }) {
+  const { assets, taxPayable, opening, capital, drawings, retained, equity, balanced } = balanceSheetFigures(data, taxRate);
 
   return (
     <>
@@ -521,7 +469,10 @@ function BalanceSheet({ data, taxRate, investors }: { data: ReportData; taxRate:
 
 /* ------------------------------ signatures ------------------------------ */
 
-function Signatures({ investors }: { investors: Investor[] }) {
+export type SignedBy = Record<string, { image: string | null; at: string }>;
+
+/** Sign-off block. With `signed`, approved investors get their signature + date. */
+export function Signatures({ investors, signed }: { investors: Pick<Investor, "id" | "name" | "sharePct">[]; signed?: SignedBy }) {
   return (
     <div className="mt-12 break-inside-avoid">
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-teal-deep">Approval</p>
@@ -529,16 +480,24 @@ function Signatures({ investors }: { investors: Investor[] }) {
         We, the investors of Cue Point, have reviewed and approve this statement.
       </p>
       <div className="mt-6 grid grid-cols-1 gap-x-10 gap-y-10 sm:grid-cols-2">
-        {investors.map((p) => (
-          <div key={p.id}>
-            <div className="h-12 border-b border-slate-700" />
-            <p className="mt-1.5 text-[13px] font-semibold text-slate-900">{p.name}</p>
-            <div className="mt-0.5 flex justify-between text-[11px] text-slate-500">
-              <span>Investor · {p.sharePct}%</span>
-              <span>Date: ____________</span>
+        {investors.map((p) => {
+          const s = signed?.[p.id];
+          return (
+            <div key={p.id}>
+              <div className="flex h-14 items-end border-b border-slate-700 pb-0.5">
+                {s?.image && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={s.image} alt={`${p.name} signature`} className="max-h-14 max-w-[70%] object-contain" />
+                )}
+              </div>
+              <p className="mt-1.5 text-[13px] font-semibold text-slate-900">{p.name}</p>
+              <div className="mt-0.5 flex justify-between text-[11px] text-slate-500">
+                <span>Investor · {p.sharePct}%</span>
+                <span>{s ? `Approved ${new Date(s.at).toLocaleDateString("en-GB", { timeZone: "Asia/Colombo", day: "numeric", month: "short", year: "numeric" })}` : "Date: ____________"}</span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

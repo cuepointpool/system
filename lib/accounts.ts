@@ -45,6 +45,7 @@ export interface Partner {
   sharePct: number;
   canEditAccounts: boolean;
   hasLogin: boolean;
+  hasSignature: boolean;
 }
 
 interface PartnerRow {
@@ -57,6 +58,7 @@ interface PartnerRow {
   positions: string[] | null;
   share_pct: number;
   can_edit_accounts: boolean;
+  has_signature: boolean;
 }
 const toPartner = (r: PartnerRow): Partner => ({
   id: r.id,
@@ -68,11 +70,14 @@ const toPartner = (r: PartnerRow): Partner => ({
   sharePct: int(r.share_pct),
   canEditAccounts: !!r.can_edit_accounts,
   hasLogin: !!r.username && !!r.password_hash,
+  hasSignature: !!r.has_signature,
 });
 
 export async function listPartners(): Promise<Partner[]> {
   const rows = await query<PartnerRow>(
-    `SELECT * FROM business_partners ORDER BY sort_order, created_at`,
+    `SELECT id, name, active, sort_order, username, password_hash, positions, share_pct,
+            can_edit_accounts, (signature_image IS NOT NULL) AS has_signature
+       FROM business_partners ORDER BY sort_order, created_at`,
   );
   return rows.map(toPartner);
 }

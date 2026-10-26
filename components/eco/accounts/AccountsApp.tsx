@@ -9,14 +9,16 @@ import { Ledger } from "./Ledger";
 import { Reports } from "./Reports";
 import { Investors } from "./Investors";
 import { ChangeLog } from "./ChangeLog";
+import { Approvals } from "./Approvals";
 
-type Screen = "overview" | "day" | "ledger" | "reports" | "investors" | "log";
+type Screen = "overview" | "day" | "ledger" | "reports" | "signoff" | "investors" | "log";
 
 const SCREENS: { value: Screen; label: string; hint: string }[] = [
   { value: "overview", label: "Overview", hint: "Balances & trends" },
   { value: "day", label: "Day book", hint: "Enter the day" },
   { value: "ledger", label: "Ledger", hint: "Every entry" },
   { value: "reports", label: "Reports", hint: "P&L · cash flow · balance sheet" },
+  { value: "signoff", label: "Sign-off", hint: "Approve monthly statements" },
   { value: "investors", label: "Investors", hint: "Shares & access" },
   { value: "log", label: "Change log", hint: "Who edited what" },
 ];
@@ -75,7 +77,7 @@ export function AccountsApp({ headers = {} }: { headers?: Record<string, string>
         <nav
           className={cn(
             "no-print mt-5 grid grid-cols-2 gap-2",
-            isAdmin ? "sm:grid-cols-3 lg:grid-cols-6" : "sm:grid-cols-5",
+            isAdmin ? "sm:grid-cols-4 lg:grid-cols-7" : "sm:grid-cols-3 lg:grid-cols-6",
           )}
         >
           {SCREENS.filter((s) => s.value !== "log" || isAdmin).map((s) => (
@@ -107,6 +109,7 @@ export function AccountsApp({ headers = {} }: { headers?: Record<string, string>
           {screen === "day" && <DayBook />}
           {screen === "ledger" && <Ledger />}
           {screen === "reports" && <Reports />}
+          {screen === "signoff" && <Approvals />}
           {screen === "investors" && <Investors />}
           {screen === "log" && isAdmin && <ChangeLog />}
         </div>

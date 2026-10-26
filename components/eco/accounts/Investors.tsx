@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { SignatureEditor } from "./SignaturePad";
 import { Card, ErrorNote, Label, Money, Toggle, useAccounts, useView, type Balances, type Investor } from "./ui";
 
 const POSITIONS: [string, string][] = [
@@ -88,7 +89,8 @@ function InvestorCard({
   drawings: number;
   fundsShare: number;
 }) {
-  const { headers, reloadMeta } = useAccounts();
+  const { headers, reloadMeta, meta } = useAccounts();
+  const isSelf = meta.access.partnerId === p.id;
   const [name, setName] = useState(p.name);
   const [share, setShare] = useState(String(p.sharePct));
   const [username, setUsername] = useState(p.username ?? "");
@@ -167,6 +169,16 @@ function InvestorCard({
         <Stat k="Share of funds" v={fundsShare} />
         <Stat k="Capital in" v={capital} />
         <Stat k="Withdrawn" v={drawings} />
+      </div>
+
+      <div className="mt-4">
+        {isAdmin || isSelf ? (
+          <SignatureEditor partnerId={p.id} isSelf={isSelf} />
+        ) : (
+          <p className={cn("text-[11px]", p.hasSignature ? "text-teal" : "text-mist")}>
+            {p.hasSignature ? "✓ Signature on file" : "No signature added yet"}
+          </p>
+        )}
       </div>
 
       {isAdmin && (

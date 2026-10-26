@@ -37,6 +37,7 @@ export type Investor = {
   sharePct: number;
   canEditAccounts: boolean;
   hasLogin: boolean;
+  hasSignature: boolean;
 };
 
 export type CashDay = {
@@ -49,7 +50,13 @@ export type CashDay = {
 
 export type Meta = {
   today: string;
-  access: { isAdmin: boolean; canEdit: boolean };
+  access: {
+    isAdmin: boolean;
+    canEdit: boolean;
+    /** the signed-in investor; null for admins */
+    partnerId: string | null;
+    canSubmitStatements: boolean;
+  };
   partners: Investor[];
   tables: { id: string; label: string }[];
 };

@@ -87,6 +87,7 @@ CREATE TABLE business_partners (
     CHECK (positions <@ ARRAY['director','it_admin','secretary','marketing','treasurer']::text[]),
   share_pct         INT NOT NULL DEFAULT 0 CHECK (share_pct BETWEEN 0 AND 100),
   can_edit_accounts BOOLEAN NOT NULL DEFAULT FALSE,
+  signature_image   TEXT,   -- transparent PNG data URL for signed statements
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -163,6 +164,35 @@ CREATE TABLE acct_entry_log (
   after      JSONB
 );
 CREATE INDEX acct_entry_log_at_idx ON acct_entry_log (at DESC);
+
+-- signed balance sheets: submitted by the treasurer, approved by every
+-- investor; short-lived (finished reviews removed after 7 days)
+CREATE TABLE statement_reviews (
+  id            TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL DEFAULT 'balance_sheet',
+  month         TEXT NOT NULL,
+  period_from   DATE NOT NULL,
+  period_to     DATE NOT NULL,
+  tax_rate      NUMERIC NOT NULL DEFAULT 0,
+  snapshot      JSONB NOT NULL,
+  investors     JSONB NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','approved','rejected')),
+  submitted_by  TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at  TIMESTAMPTZ
+);
+CREATE INDEX statement_reviews_created_idx ON statement_reviews (created_at DESC);
+
+CREATE TABLE statement_approvals (
+  review_id   TEXT NOT NULL REFERENCES statement_reviews(id) ON DELETE CASCADE,
+  partner_id  TEXT NOT NULL,
+  decision    TEXT NOT NULL CHECK (decision IN ('approve','reject')),
+  note        TEXT NOT NULL DEFAULT '',
+  signature   TEXT,
+  at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (review_id, partner_id)
+);
 
 -- ----------------------------------------------------------- player model ---
 
