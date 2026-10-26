@@ -11,7 +11,7 @@ import {
 import { Seg, Toggle, addDays, fmt, longDate, useAccounts, useView, type Investor } from "./ui";
 
 type Kind = "pl" | "cf" | "bs";
-type Preset = "month" | "last" | "year" | "all" | "custom";
+type Preset = "today" | "yesterday" | "month" | "last" | "year" | "all" | "custom";
 
 const TITLES: Record<Kind, string> = {
   pl: "Profit & Loss Statement",
@@ -22,7 +22,7 @@ const TITLES: Record<Kind, string> = {
 export function Reports() {
   const { meta } = useAccounts();
   const [kind, setKind] = useState<Kind>("pl");
-  const [preset, setPreset] = useState<Preset>("month");
+  const [preset, setPreset] = useState<Preset>("today");
   const [custom, setCustom] = useState({ from: meta.today.slice(0, 8) + "01", to: meta.today });
   const [tax, setTax] = useState(false);
   const [rate, setRate] = useState("30");
@@ -52,11 +52,14 @@ export function Reports() {
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <div className="max-w-full overflow-x-auto">
           <Seg
             size="sm"
             value={preset}
             onChange={setPreset}
             options={[
+              { value: "today", label: "Today" },
+              { value: "yesterday", label: "Yesterday" },
               { value: "month", label: "This month" },
               { value: "last", label: "Last month" },
               { value: "year", label: "This year" },
@@ -64,6 +67,7 @@ export function Reports() {
               { value: "custom", label: "Custom" },
             ]}
           />
+          </div>
           {preset === "custom" && (
             <div className="flex items-center gap-2">
               <input type="date" value={custom.from} onChange={(e) => e.target.value && setCustom((c) => ({ ...c, from: e.target.value }))} className="input h-8 w-36 text-xs" />
@@ -114,7 +118,14 @@ export function Reports() {
 function periodFor(p: Preset, today: string, custom: { from: string; to: string }) {
   const y = today.slice(0, 4);
   const monthStart = today.slice(0, 8) + "01";
+  // `today` is the business day (12 PM–6 AM), so "Today" at 2 AM is still last night
   switch (p) {
+    case "today":
+      return { from: today, to: today };
+    case "yesterday": {
+      const d = addDays(today, -1);
+      return { from: d, to: d };
+    }
     case "month":
       return { from: monthStart, to: today };
     case "last": {
