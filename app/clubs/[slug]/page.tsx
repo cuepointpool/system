@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PlayerAvatar } from "@/components/eco/Primitives";
-import { clubViewer, getClubIdBySlug, getClubView } from "@/lib/clubs/store";
+import { JoinClubButton } from "@/components/clubs/JoinClubButton";
+import { clubViewer, getClubIdBySlug, getClubView, hasRequested } from "@/lib/clubs/store";
 import { getViewer } from "@/lib/ecosystem/identity";
 import { formatLine } from "@/lib/friends/structure";
 
@@ -35,6 +36,9 @@ export default async function ClubPage({ params }: { params: Promise<{ slug: str
   const isAdmin = club?.id === id;
   const current = v.weeks[0];
   const myGroup = viewer ? v.groups.find((g) => g.members.some((m) => m.id === viewer.id)) : undefined;
+  const canAsk = !!viewer && viewer.role === "player" && !myGroup;
+  const requested = canAsk ? await hasRequested(id, viewer!.id) : false;
+  const memberCount = v.groups.reduce((n, g) => n + g.members.length, 0);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-5 pb-28 pt-28 md:px-8 sm:pt-32">
@@ -58,6 +62,22 @@ export default async function ClubPage({ params }: { params: Promise<{ slug: str
           </Link>
         )}
       </div>
+
+      {canAsk && <JoinClubButton slug={v.slug} clubName={v.name} requested={requested} />}
+      {!viewer && !isAdmin && (
+        <div className="rounded-2xl border border-[#a78bfa]/40 bg-[#a78bfa]/[0.06] p-4">
+          <p className="font-semibold text-white">Want to play for {v.name}?</p>
+          <p className="mt-1 text-sm text-mist">
+            Sign in to your Cue Point account (or register — it&apos;s free), then ask to join.
+          </p>
+          <Link
+            href={`/account?next=${encodeURIComponent(`/clubs/${v.slug}`)}`}
+            className="mt-3 inline-flex min-h-[44px] items-center rounded-full bg-[linear-gradient(120deg,#a78bfa,#ec4899)] px-5 text-sm font-bold text-white"
+          >
+            Sign in to join
+          </Link>
+        </div>
+      )}
 
       {current && (
         <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
@@ -83,7 +103,9 @@ export default async function ClubPage({ params }: { params: Promise<{ slug: str
       )}
 
       <section>
-        <h2 className="font-display text-xl font-bold text-white">Groups</h2>
+        <h2 className="font-display text-xl font-bold text-white">
+          Members <span className="text-base font-normal text-mist">({memberCount})</span>
+        </h2>
         <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {v.groups.map((g) => (
             <div key={g.group} className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
@@ -136,15 +158,6 @@ export default async function ClubPage({ params }: { params: Promise<{ slug: str
         </section>
       )}
 
-      {!viewer && !isAdmin && (
-        <p className="text-sm text-mist">
-          Want to play for {v.name}?{" "}
-          <Link href="/account" className="underline">
-            Register a Cue Point account
-          </Link>{" "}
-          and ask the club admin to add you.
-        </p>
-      )}
     </div>
   );
 }

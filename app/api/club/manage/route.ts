@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   addMember,
   ClubError,
+  declineJoinRequest,
   clubViewer,
   getClubView,
   moveMember,
@@ -53,17 +54,22 @@ export async function POST(req: NextRequest) {
           groupNames: b.groupNames,
           moveCount: b.moveCount,
           leagueSettings: b.leagueSettings,
+          finalSettings: b.finalSettings,
         });
         break;
       case "swap-members":
         await swapMembers(club.id, str(b.a), str(b.b));
         detail = `${str(b.a)} <> ${str(b.b)}`;
         break;
+      case "decline-request":
+        await declineJoinRequest(club.id, str(b.playerId));
+        detail = str(b.playerId);
+        break;
       case "undo-moves":
         detail = `${await undoLastMoves(club.id)} moved back`;
         break;
       case "start-week":
-        detail = (await startWeek(club.id)).join(",");
+        detail = (await startWeek(club.id, b.allowSkip === true)).join(",");
         break;
       default:
         return json({ error: "Unknown action" }, 404);

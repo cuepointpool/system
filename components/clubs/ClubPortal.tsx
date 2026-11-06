@@ -3,17 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PlayerAvatar } from "@/components/eco/Primitives";
-import { PlayerPicker } from "@/components/friends/PlayerPicker";
 import { setActAsClub } from "@/components/friends/api";
 import { Card, GhostButton, Notice, PrimaryButton } from "@/components/friends/ui";
-import type { ClubMemberView, ClubView } from "@/lib/clubs/store";
-import {
-  bestOfSlots,
-  FINISH_LABEL,
-  formatLine,
-  type LeagueFinish,
-  type TournamentSettings,
-} from "@/lib/friends/structure";
+import type { ClubMemberView, ClubView, CuePointPlayer } from "@/lib/clubs/store";
+import { FormatPicker } from "@/components/friends/FormatPicker";
+import { formatLine, type TournamentSettings } from "@/lib/friends/structure";
 import { cn } from "@/lib/utils";
 
 /* Club admin portal — built for a phone first: four big tabs, one clear
@@ -195,9 +189,9 @@ function Manage({
   };
 
   const total = view.groups.reduce((n, g) => n + g.members.length, 0);
-  const tabs: { id: Tab; label: string; icon: string }[] = [
+  const tabs: { id: Tab; label: string; icon: string; badge?: number }[] = [
     { id: "week", label: "This week", icon: "🎱" },
-    { id: "groups", label: `Players (${total})`, icon: "👥" },
+    { id: "groups", label: `Players (${total})`, icon: "👥", badge: view.requests.length },
     { id: "settings", label: "Settings", icon: "⚙️" },
     { id: "history", label: "History", icon: "🏆" },
   ];
@@ -215,7 +209,7 @@ function Manage({
                 setMsg(null);
               }}
               className={cn(
-                "flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-xl border px-1 text-[11px] font-semibold leading-tight sm:flex-row sm:gap-2 sm:text-sm",
+                "relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-xl border px-1 text-[11px] font-semibold leading-tight sm:flex-row sm:gap-2 sm:text-sm",
                 tab === t.id
                   ? "border-[#a78bfa]/70 bg-[#a78bfa]/15 text-white"
                   : "border-white/10 bg-white/[0.03] text-mist",
@@ -225,6 +219,11 @@ function Manage({
                 {t.icon}
               </span>
               {t.label}
+              {!!t.badge && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#ec4899] px-1 text-[11px] font-bold text-white">
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -232,6 +231,18 @@ function Manage({
 
       {msg && <Notice tone={msg.ok ? "ok" : "error"}>{msg.text}</Notice>}
 
+      {tab === "week" && view.requests.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setTab("groups")}
+          className="flex min-h-[52px] w-full items-center justify-between gap-3 rounded-2xl border border-[#ec4899]/50 bg-[#ec4899]/10 px-4 text-left text-sm text-white"
+        >
+          <span>
+            <b>{view.requests.length}</b> player{view.requests.length === 1 ? "" : "s"} asked to join
+          </span>
+          <span className="font-semibold text-[#f9a8d4]">Review →</span>
+        </button>
+      )}
       {tab === "week" && <ThisWeek view={view} slug={slug} busy={busy} act={act} goGroups={() => setTab("groups")} />}
       {tab === "groups" && <Groups view={view} busy={busy} act={act} />}
       {tab === "settings" && <Settings view={view} busy={busy} act={act} />}
@@ -257,24 +268,42 @@ function ThisWeek({
 }) {
   const current = view.weeks[0];
   const short = view.groups.filter((g) => g.members.length < 3);
+  const playing = view.groups.length - short.length;
   const name = (g: number) => view.groups.find((x) => x.group === g)?.name ?? `Group ${g}`;
+  const start = () => {
+    if (
+      short.length &&
+      !confirm(
+        `${short.map((g) => g.name).join(", ")} ${short.length === 1 ? "has" : "have"} fewer than 3 players and will sit this week out. Start week ${view.nextWeek} with the other ${playing === 1 ? "group" : `${playing} groups`}?`,
+      )
+    )
+      return;
+    void act(
+      { action: "start-week", allowSkip: short.length > 0 },
+      `Week ${view.nextWeek} started${short.length ? ` in ${playing} group${playing === 1 ? "" : "s"}` : ""} — the fixtures are out.`,
+    );
+  };
 
   const startButton = (
     <>
       {short.length > 0 && (
-        <p className="text-sm text-red-300">
-          {short.map((g) => g.name).join(", ")} need{short.length === 1 ? "s" : ""} at least 3 players.{" "}
+        <p className="rounded-xl border border-[#ffb066]/35 bg-[#ff9d3d]/[0.08] px-3 py-2 text-sm text-[#ffc98f]">
+          {playing === 0 ? (
+            <>No group has 3 players yet. </>
+          ) : (
+            <>
+              {short.map((g) => g.name).join(", ")} {short.length === 1 ? "has" : "have"} fewer than 3 players — it
+              {short.length === 1 ? "" : " they"} will sit this week out. Only full groups play.{" "}
+            </>
+          )}
           <button type="button" className="underline" onClick={goGroups}>
             Add players
           </button>
         </p>
       )}
-      <PrimaryButton
-        className="w-full py-3.5 text-base sm:w-auto"
-        disabled={busy || short.length > 0}
-        onClick={() => act({ action: "start-week" }, `Week ${view.nextWeek} started — the fixtures are out.`)}
-      >
+      <PrimaryButton className="w-full py-3.5 text-base sm:w-auto" disabled={busy || playing === 0} onClick={start}>
         ▶ Start week {view.nextWeek}
+        {short.length > 0 && playing > 0 ? ` (${playing} group${playing === 1 ? "" : "s"})` : ""}
       </PrimaryButton>
     </>
   );
@@ -296,7 +325,7 @@ function ThisWeek({
             >
               <span className="flex items-center justify-between gap-3">
                 <span className="font-display text-lg font-semibold text-white">
-                  {t.group === 1 ? "★ " : ""}
+                  {t.group === 0 ? "🏆 " : t.group === 1 ? "★ " : ""}
                   {t.groupName}
                 </span>
                 <span className={cn("text-sm font-semibold", done ? "text-teal" : "text-[#c4b5fd]")}>
@@ -313,6 +342,19 @@ function ThisWeek({
             </Link>
           );
         })}
+        {view.finalSettings.enabled && !current.tournaments.some((t) => t.group === 0) && (
+          <p className="rounded-2xl border border-dashed border-[#a78bfa]/40 px-4 py-3 text-sm text-[#c4b5fd]">
+            🏆 Club final — the top {view.finalSettings.perGroup} of each group play it as soon as every group has
+            finished.
+          </p>
+        )}
+        {view.groups
+          .filter((g) => !current.tournaments.some((t) => t.group === g.group))
+          .map((g) => (
+            <p key={g.group} className="rounded-2xl border border-dashed border-white/15 px-4 py-3 text-sm text-mist">
+              {g.name} · sitting out this week ({g.members.length} player{g.members.length === 1 ? "" : "s"})
+            </p>
+          ))}
         <p className="text-xs text-mist">
           When every group has finished, the groups for next week are made automatically.
         </p>
@@ -371,6 +413,7 @@ function ThisWeek({
           </Card>
         )}
 
+        <HowItsPlayed view={view} busy={busy} act={act} />
         <Card className="space-y-3">
           <h3 className="font-display text-lg font-bold text-white">Next: week {view.nextWeek}</h3>
           <GroupCounts view={view} />
@@ -382,15 +425,17 @@ function ThisWeek({
 
   // ---- the very first week ----
   return (
+    <div className="space-y-4">
+    <HowItsPlayed view={view} busy={busy} act={act} />
     <Card className="space-y-3">
       <h2 className="font-display text-xl font-bold text-white">Week 1</h2>
       <p className="text-sm text-mist">
-        Starts a league in every group ({formatLine(view.leagueSettings)}). Everyone is put in straight away —
-        nobody has to accept.
+        Starts a tournament in every group. Everyone is put in straight away — nobody has to accept.
       </p>
       <GroupCounts view={view} />
       {startButton}
     </Card>
+    </div>
   );
 }
 
@@ -406,6 +451,7 @@ function GroupCounts({ view }: { view: ClubView }) {
           )}
         >
           {g.name}: {g.members.length}
+          {g.members.length < 3 ? " · sits out" : ""}
         </li>
       ))}
     </ul>
@@ -441,10 +487,9 @@ function MoveList({
 /* ----------------------------- players & groups ----------------------------- */
 
 function Groups({ view, busy, act }: { view: ClubView; busy: boolean; act: Act }) {
-  const [addTo, setAddTo] = useState(view.groupCount);
+  const [mode, setMode] = useState<"groups" | "add">(view.groups.every((g) => !g.members.length) ? "add" : "groups");
   const [picked, setPicked] = useState<ClubMemberView | null>(null);
   const [swapFrom, setSwapFrom] = useState<ClubMemberView | null>(null);
-  const target = Math.min(addTo, view.groupCount);
   const memberIds = new Set(view.groups.flatMap((g) => g.members.map((m) => m.id)));
   const moved = new Map(
     (view.lastMoves && !view.lastMoves.undone ? view.lastMoves.moves : []).map((m) => [m.playerId, m.to < m.from ? "up" : "down"]),
@@ -475,33 +520,35 @@ function Groups({ view, busy, act }: { view: ClubView; busy: boolean; act: Act }
           </button>
         </div>
       ) : (
-        <Card className="space-y-3">
-          <p className="text-sm font-semibold text-white">Add a player</p>
-          <p className="text-xs text-mist">They need a Cue Point account first (register at cuepoint.lk/account).</p>
-          <div className="flex flex-wrap gap-2">
-            {view.groups.map((g) => (
-              <button
-                key={g.group}
-                type="button"
-                onClick={() => setAddTo(g.group)}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs",
-                  target === g.group ? "border-[#a78bfa]/70 bg-[#a78bfa]/15 text-white" : "border-white/15 text-mist",
-                )}
-              >
-                into {g.name}
-              </button>
-            ))}
-          </div>
-          <PlayerPicker
-            exclude={memberIds}
-            disabled={busy}
-            placeholder="Search by name…"
-            onPick={(p) => act({ action: "add-member", playerId: p.id, group: target }, `${p.nickname} added to ${groupName(target)}.`)}
-          />
-        </Card>
+        <>
+        {view.requests.length > 0 && <JoinRequests view={view} busy={busy} act={act} />}
+        <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-1">
+          {(
+            [
+              ["groups", `Club groups (${memberIds.size})`],
+              ["add", "＋ Add players"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMode(id)}
+              className={cn(
+                "min-h-[48px] rounded-xl text-sm font-semibold",
+                mode === id ? "bg-[#a78bfa]/20 text-white" : "text-mist",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        </>
       )}
 
+      {mode === "add" && !swapFrom && <PlayerDirectory view={view} busy={busy} act={act} />}
+
+      {mode === "groups" && (
+      <>
       <p className="text-xs text-mist">Tap a player to move, swap or remove them. Changes count from the next week.</p>
 
       <div className={cn("grid gap-4", view.groupCount > 1 && "md:grid-cols-2")}>
@@ -548,6 +595,9 @@ function Groups({ view, busy, act }: { view: ClubView; busy: boolean; act: Act }
         ))}
       </div>
 
+      </>
+      )}
+
       {picked && (
         <PlayerSheet
           m={picked}
@@ -571,6 +621,144 @@ function Groups({ view, busy, act }: { view: ClubView; busy: boolean; act: Act }
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** players who asked to join from the club page */
+function JoinRequests({ view, busy, act }: { view: ClubView; busy: boolean; act: Act }) {
+  return (
+    <div className="rounded-2xl border border-[#ec4899]/40 bg-[#ec4899]/[0.06] p-4">
+      <p className="font-display text-lg font-bold text-white">Asked to join ({view.requests.length})</p>
+      <p className="text-xs text-mist">Tap a group to accept them into it.</p>
+      <ul className="mt-2 divide-y divide-white/5">
+        {view.requests.map((r) => (
+          <li key={r.playerId} className="py-3">
+            <div className="flex items-center gap-3">
+              <PlayerAvatar name={r.nickname} src={r.avatar} size="sm" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] text-white">{r.nickname}</span>
+                <span className="block truncate text-xs text-mist">
+                  {r.fullName !== r.nickname ? `${r.fullName} · ` : ""}@{r.slug}
+                </span>
+              </span>
+            </div>
+            {r.message && <p className="mt-2 rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-white/90">“{r.message}”</p>}
+            <div className="mt-2 flex flex-wrap gap-2">
+              {view.groups.map((g) => (
+                <button
+                  key={g.group}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => act({ action: "add-member", playerId: r.playerId, group: g.group }, `${r.nickname} accepted into ${g.name}.`)}
+                  className="min-h-[44px] rounded-full bg-[linear-gradient(120deg,#a78bfa,#ec4899)] px-4 text-sm font-bold text-white disabled:opacity-40"
+                >
+                  ✓ {g.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (confirm(`Decline ${r.nickname}'s request?`))
+                    void act({ action: "decline-request", playerId: r.playerId }, `${r.nickname}'s request declined.`);
+                }}
+                className="min-h-[44px] rounded-full border border-white/15 px-4 text-sm text-mist"
+              >
+                Decline
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** every registered Cue Point player, with one-tap "add to group" buttons */
+function PlayerDirectory({ view, busy, act }: { view: ClubView; busy: boolean; act: Act }) {
+  const [players, setPlayers] = useState<CuePointPlayer[] | null>(null);
+  const [q, setQ] = useState("");
+  const [onlyNew, setOnlyNew] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetch("/api/club/players", { cache: "no-store" })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || "Could not load players.");
+        setPlayers(d.players ?? []);
+        setError(null);
+      })
+      .catch((e: Error) => setError(e.message));
+  }, []);
+  // reload whenever the club changes (someone added / moved / removed)
+  useEffect(() => load(), [load, view]);
+
+  const groupName = (g: number) => view.groups.find((x) => x.group === g)?.name ?? `Group ${g}`;
+  const term = q.trim().toLowerCase();
+  const all = players ?? [];
+  const list = all.filter(
+    (p) =>
+      (!onlyNew || p.group == null) &&
+      (!term || p.nickname.toLowerCase().includes(term) || p.fullName.toLowerCase().includes(term) || p.slug.includes(term)),
+  );
+  const notIn = all.filter((p) => p.group == null).length;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-mist">
+        All registered Cue Point players ({all.length}) · {notIn} not in the club yet. New players register at
+        cuepoint.lk/account, then appear here.
+      </p>
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Filter by name…"
+        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-base text-white placeholder:text-mist/60 focus:border-[#a78bfa]/60 focus:outline-none"
+      />
+      <label className="flex min-h-[40px] items-center gap-3 text-sm text-white/90">
+        <input type="checkbox" className="h-5 w-5" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} />
+        Only players not in the club
+      </label>
+      {error && <Notice tone="error">{error}</Notice>}
+      {players === null && !error && <p className="text-sm text-mist">Loading players…</p>}
+      {players && !list.length && (
+        <p className="text-sm text-mist">{term ? "Nobody matches that name." : "Everyone is already in the club."}</p>
+      )}
+      <ul className="divide-y divide-white/5 rounded-2xl border border-white/10 bg-white/[0.025]">
+        {list.map((p) => (
+          <li key={p.id} className="flex flex-wrap items-center gap-3 px-3 py-3">
+            <PlayerAvatar name={p.nickname} src={p.avatar} size="sm" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[15px] text-white">{p.nickname}</span>
+              <span className="block truncate text-xs text-mist">
+                {p.fullName !== p.nickname ? `${p.fullName} · ` : ""}@{p.slug}
+              </span>
+            </span>
+            {p.group != null ? (
+              <span className="rounded-full border border-teal/40 bg-teal/10 px-3 py-1 text-xs text-teal">
+                In {groupName(p.group)}
+              </span>
+            ) : (
+              <span className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+                {view.groups.map((g) => (
+                  <button
+                    key={g.group}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => act({ action: "add-member", playerId: p.id, group: g.group }, `${p.nickname} added to ${g.name}.`)}
+                    className="min-h-[40px] rounded-full border border-[#a78bfa]/60 px-4 text-sm font-semibold text-[#c4b5fd] active:bg-[#a78bfa]/15 disabled:opacity-40"
+                  >
+                    + {g.name}
+                  </button>
+                ))}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -654,8 +842,6 @@ function Settings({ view, busy, act }: { view: ClubView; busy: boolean; act: Act
   const [count, setCount] = useState(view.groupCount);
   const [names, setNames] = useState<string[]>(view.groups.map((g) => g.name));
   const [moves, setMoves] = useState<string>(view.moveCount == null ? "half" : String(view.moveCount));
-  const [s, setS] = useState<TournamentSettings>(view.leagueSettings);
-  const frames = s.bestOf["Table matches"] ?? 1;
 
   const removing = view.groups.filter((g) => g.group > count && g.members.length).length;
   const nameFor = (i: number) => names[i] ?? (i === 0 ? "Pro" : `Group ${i + 1}`);
@@ -725,68 +911,6 @@ function Settings({ view, busy, act }: { view: ClubView; busy: boolean; act: Act
         </label>
       </Card>
 
-      <Card className="space-y-4">
-        <p className="font-semibold text-white">League rules (every group)</p>
-        <label className="block text-sm text-mist">
-          Play each other
-          <select
-            className="input mt-1 w-full"
-            value={s.legs}
-            onChange={(e) => setS({ ...s, legs: Number(e.target.value) === 2 ? 2 : 1 })}
-          >
-            <option value={1}>Once</option>
-            <option value={2}>Twice</option>
-          </select>
-        </label>
-        <label className="block text-sm text-mist">
-          Who wins the week
-          <select
-            className="input mt-1 w-full"
-            value={s.finish}
-            onChange={(e) => setS({ ...s, finish: e.target.value as LeagueFinish })}
-          >
-            {(Object.keys(FINISH_LABEL) as LeagueFinish[]).map((f) => (
-              <option key={f} value={f}>
-                {FINISH_LABEL[f]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {s.finish !== "table" && (
-          <label className="flex min-h-[44px] items-center gap-3 text-sm text-white/90">
-            <input
-              type="checkbox"
-              className="h-5 w-5"
-              checked={s.thirdPlace}
-              onChange={(e) => setS({ ...s, thirdPlace: e.target.checked })}
-            />
-            Play a 3rd-place match
-          </label>
-        )}
-        <label className="block text-sm text-mist">
-          Frames per match
-          <select
-            className="input mt-1 w-full"
-            value={frames}
-            onChange={(e) => {
-              const n = Number(e.target.value) as 1 | 3 | 5 | 7 | 9;
-              const slots = bestOfSlots({ ...s, kind: "league" }, 16);
-              setS({ ...s, bestOf: Object.fromEntries(slots.map((k) => [k, n])) as TournamentSettings["bestOf"] });
-            }}
-          >
-            {[1, 3, 5, 7, 9].map((n) => (
-              <option key={n} value={n}>
-                {n === 1 ? "Single frame" : `Best of ${n}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="text-xs text-mist">
-          Frame scores count on the Cue Point rankings: a 3–0 win moves a rating more than 3–2. New rules apply from the
-          next week.
-        </p>
-      </Card>
-
       <PrimaryButton
         className="w-full py-3.5 text-base sm:w-auto"
         disabled={busy}
@@ -797,15 +921,134 @@ function Settings({ view, busy, act }: { view: ClubView; busy: boolean; act: Act
               groupCount: count,
               groupNames: Array.from({ length: count }, (_, i) => nameFor(i)),
               moveCount: moves === "half" ? null : Number(moves),
-              leagueSettings: s,
             },
             "Settings saved.",
           )
         }
       >
-        Save settings
+        Save group settings
       </PrimaryButton>
+
+      <HowItsPlayed view={view} busy={busy} act={act} />
     </div>
+  );
+}
+
+/* ----------------------------- how it's played ----------------------------- */
+
+/**
+ * The same choices as creating any Cue Point tournament — for every group,
+ * and for the optional club final (top players of every group).
+ */
+function HowItsPlayed({ view, busy, act }: { view: ClubView; busy: boolean; act: Act }) {
+  const [groupS, setGroupS] = useState<TournamentSettings>(view.leagueSettings);
+  const [fin, setFin] = useState(view.finalSettings);
+  const [edit, setEdit] = useState<"groups" | "final" | null>(null);
+  const playing = Math.max(1, view.groups.filter((g) => g.members.length >= 3).length);
+  const groupSize = Math.max(3, ...view.groups.map((g) => g.members.length));
+  const finalSize = Math.max(3, fin.perGroup * playing);
+  const dirty =
+    JSON.stringify(groupS) !== JSON.stringify(view.leagueSettings) ||
+    JSON.stringify(fin) !== JSON.stringify(view.finalSettings);
+  const multi = view.groupCount > 1;
+
+  return (
+    <Card className="space-y-4">
+      <div>
+        <p className="font-display text-lg font-bold text-white">How it&apos;s played</p>
+        <p className="text-xs text-mist">The same options as any Cue Point tournament. Changes apply to the next week.</p>
+      </div>
+
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+        <p className="text-sm font-semibold text-white">{multi ? "Each group plays" : "The club plays"}</p>
+        <p className="mt-1 text-sm text-[#c4b5fd]">{formatLine(groupS)}</p>
+        {edit === "groups" ? (
+          <div className="mt-3">
+            <FormatPicker value={groupS} onChange={setGroupS} entries={groupSize} noun="player" noLimit />
+            <GhostButton className="mt-3" onClick={() => setEdit(null)}>
+              Done
+            </GhostButton>
+          </div>
+        ) : (
+          <GhostButton className="mt-3" onClick={() => setEdit("groups")}>
+            Change
+          </GhostButton>
+        )}
+      </div>
+
+      {multi && (
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <label className="flex min-h-[44px] items-center justify-between gap-3">
+            <span>
+              <span className="block text-sm font-semibold text-white">🏆 Club final</span>
+              <span className="block text-xs text-mist">
+                After the groups, the top players of every group play together until one wins. Then the groups are
+                re-made.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              className="h-6 w-6 shrink-0"
+              checked={fin.enabled}
+              onChange={(e) => setFin({ ...fin, enabled: e.target.checked })}
+            />
+          </label>
+          {fin.enabled && (
+            <>
+              <p className="mt-3 text-sm text-white/90">From each group, the top</p>
+              <div className="mt-2 grid grid-cols-4 gap-2">
+                {[1, 2, 3, 4].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setFin({ ...fin, perGroup: n })}
+                    className={cn(
+                      "min-h-[48px] rounded-xl border text-lg font-bold",
+                      fin.perGroup === n ? "border-[#a78bfa]/70 bg-[#a78bfa]/20 text-white" : "border-white/15 text-mist",
+                    )}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-mist">
+                About {fin.perGroup * playing} players · group winners are kept apart.
+              </p>
+              <p className="mt-3 text-sm text-[#c4b5fd]">{formatLine(fin.settings)}</p>
+              {edit === "final" ? (
+                <div className="mt-3">
+                  <FormatPicker
+                    value={fin.settings}
+                    onChange={(x) => setFin({ ...fin, settings: x })}
+                    entries={finalSize}
+                    noun="player"
+                    noLimit
+                  />
+                  <GhostButton className="mt-3" onClick={() => setEdit(null)}>
+                    Done
+                  </GhostButton>
+                </div>
+              ) : (
+                <GhostButton className="mt-3" onClick={() => setEdit("final")}>
+                  Change final format
+                </GhostButton>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <PrimaryButton
+        className="w-full py-3.5 text-base sm:w-auto"
+        disabled={busy || !dirty}
+        onClick={async () => {
+          if (await act({ action: "settings", leagueSettings: groupS, finalSettings: fin }, "Saved — used from the next week."))
+            setEdit(null);
+        }}
+      >
+        {dirty ? "Save how it's played" : "Saved ✓"}
+      </PrimaryButton>
+    </Card>
   );
 }
 

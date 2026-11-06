@@ -214,7 +214,7 @@ interface TournamentRow {
   format: FormatCode;
   players_per_team: number;
   capacity_teams: number;
-  seeding: "random" | "ranking";
+  seeding: "random" | "ranking" | "manual";
   status: TournamentStatus;
   champion_team_id: string | null;
   roster_key: string | null;
@@ -3303,6 +3303,15 @@ async function seedTeams(c: PoolClient, t: TournamentRow, teamIds: string[]): Pr
     const j = randomInt(i + 1);
     [order[i], order[j]] = [order[j], order[i]];
   }
+  // club final: the order the club gave (group winners first)
+  if (t.seeding === "manual") {
+    const seeds = await inTx(c)<{ id: string; seed: number | null }>(
+      `SELECT id, seed FROM friend_teams WHERE id = ANY($1)`,
+      [teamIds],
+    );
+    const at = new Map(seeds.map((x) => [x.id, x.seed ?? 1e9]));
+    return [...teamIds].sort((a, b) => (at.get(a) ?? 1e9) - (at.get(b) ?? 1e9));
+  }
   if (t.seeding !== "ranking") return order;
   const { stats } = await computeStats();
   const members = await inTx(c)<{ team_id: string; player_id: string }>(
@@ -3527,33 +3536,37 @@ export interface ClubLeagueInput {
   clubName: string;
   week: number;
   settings: unknown;
+  /** group 0 = the club final (top players of every group) */
   groups: { group: number; name: string; playerIds: string[] }[];
+  /** "manual" = play in the order given (best first), e.g. group winners first */
+  seeding?: "random" | "manual";
 }
 
 /**
- * One club week: a league per group, every player already in (the club
- * placed them — nobody has to accept), all started at once. One
- * transaction: either every group's league starts or none does.
+ * Club tournaments: one per group (or the club final), every player
+ * already in (the club placed them — nobody has to accept), all started at
+ * once, any format. One transaction: either all start or none does.
  */
 export async function createClubLeagues(input: ClubLeagueInput): Promise<string[]> {
   const actor: Actor = { id: input.hostId, role: "club", nickname: input.clubName };
-  const settings = normalizeSettings({ ...(input.settings as object), kind: "league" });
+  const settings = normalizeSettings(input.settings);
+  const seeding = input.seeding ?? "random";
   for (const g of input.groups) {
     if (g.playerIds.length < MIN_TEAMS_TO_START)
       throw new FriendsError(
         400,
-        `${g.name} has ${g.playerIds.length} player${g.playerIds.length === 1 ? "" : "s"} — at least ${MIN_TEAMS_TO_START} are needed for a league.`,
+        `${g.name} has ${g.playerIds.length} player${g.playerIds.length === 1 ? "" : "s"} — at least ${MIN_TEAMS_TO_START} are needed.`,
       );
     const problem = validateSettings(settings, g.playerIds.length, true);
     if (problem) throw new FriendsError(400, `${g.name}: ${problem}`);
   }
   return transaction(async (c) => {
-    // one week at a time: lock the club, then make sure this week is new
+    // lock the club, then make sure these groups haven't started this week
     await c.query(`SELECT 1 FROM clubs WHERE id = $1 FOR UPDATE`, [input.clubId]);
-    const dup = await c.query(`SELECT 1 FROM friend_tournaments WHERE club_id = $1 AND club_week = $2`, [
-      input.clubId,
-      input.week,
-    ]);
+    const dup = await c.query(
+      `SELECT 1 FROM friend_tournaments WHERE club_id = $1 AND club_week = $2 AND club_group = ANY($3)`,
+      [input.clubId, input.week, input.groups.map((g) => g.group)],
+    );
     if (dup.rowCount) throw new FriendsError(409, "This week has already started.");
     const ids: string[] = [];
     for (const g of input.groups) {
@@ -3562,12 +3575,14 @@ export async function createClubLeagues(input: ClubLeagueInput): Promise<string[
         `INSERT INTO friend_tournaments
            (id, name, organizer_id, format, players_per_team, capacity_teams, seeding, kind, settings,
             club_id, club_week, club_group)
-         VALUES ($1,$2,$3,'1v1',1,$4,'random','league',$5,$6,$7,$8)`,
+         VALUES ($1,$2,$3,'1v1',1,$4,$5,$6,$7,$8,$9,$10)`,
         [
           id,
-          cleanName(`${input.clubName} · Week ${input.week} · ${g.name}`, "Club league"),
+          cleanName(`${input.clubName} · Week ${input.week} · ${g.name}`, "Club tournament"),
           input.hostId,
           NO_LIMIT,
+          seeding,
+          settings.kind,
           JSON.stringify(settings),
           input.clubId,
           input.week,
@@ -3576,9 +3591,10 @@ export async function createClubLeagues(input: ClubLeagueInput): Promise<string[
       );
       const t = await lockTournament(c, id);
       const batch = new Batch(c);
-      for (const pid of g.playerIds) {
+      for (const [i, pid] of g.playerIds.entries()) {
         await checkNewTeam(c, t, [pid]);
-        await insertTeam(c, batch, t, [pid], actor);
+        const teamId = await insertTeam(c, batch, t, [pid], actor);
+        if (seeding === "manual") await c.query(`UPDATE friend_teams SET seed = $2 WHERE id = $1`, [teamId, i + 1]);
       }
       await batch.flush();
       await startLocked(c, id, actor, true);
@@ -3588,10 +3604,13 @@ export async function createClubLeagues(input: ClubLeagueInput): Promise<string[
   });
 }
 
+const KNOCKOUT_STAGES = new Set<Stage>(["knockout", "upper", "lower", "grand_final", "playoff", "third_place"]);
+
 /**
- * Where everyone finished in a completed club league, best first (player
- * ids): the podium from the final rounds, then the table. null while the
- * league is still being played (or was cancelled).
+ * Where everyone finished in a completed club tournament, best first
+ * (player ids), for any format: the podium, then how far each got in the
+ * knockout rounds, then their place in a table, then matches won. null
+ * while it's still being played (or was cancelled).
  */
 export async function clubFinishOrder(tournamentId: string): Promise<string[] | null> {
   const [t] = await pooled<TournamentRow>(`SELECT * FROM friend_tournaments WHERE id = $1`, [tournamentId]);
@@ -3610,10 +3629,27 @@ export async function clubFinishOrder(tournamentId: string): Promise<string[] | 
   const playerOf = new Map(members.map((m) => [m.team_id, m.player_id]));
   const tables = buildTables(t, seedOrderOf(teams), games);
   const p = placementsFrom(t, games, tables);
-  const teamOrder = uniq(
-    [p.champion, p.runnerUp, p.third, ...p.semis, ...(tables[0]?.rows ?? []).map((r) => r.teamId)].filter(
-      (x): x is string => !!x,
-    ),
-  );
-  return teamOrder.map((x) => playerOf.get(x)).filter((x): x is string => !!x);
+  const podium = uniq([p.champion, p.runnerUp, p.third, ...p.semis].filter((x): x is string => !!x));
+
+  const deepest = new Map<string, number>();
+  const wins = new Map<string, number>();
+  for (const g of games) {
+    if (g.is_bye || g.status !== "completed") continue;
+    for (const side of [g.team_a_id, g.team_b_id])
+      if (side && KNOCKOUT_STAGES.has(g.stage)) deepest.set(side, Math.max(deepest.get(side) ?? 0, g.round ?? 0));
+    if (g.winner_team_id) wins.set(g.winner_team_id, (wins.get(g.winner_team_id) ?? 0) + 1);
+  }
+  const tablePos = new Map<string, number>();
+  for (const tb of tables) tb.rows.forEach((r, i) => tablePos.set(r.teamId, i));
+
+  const rest = teams
+    .map((x) => x.id)
+    .filter((x) => !podium.includes(x))
+    .sort(
+      (a, b) =>
+        (deepest.get(b) ?? -1) - (deepest.get(a) ?? -1) ||
+        (tablePos.get(a) ?? 999) - (tablePos.get(b) ?? 999) ||
+        (wins.get(b) ?? 0) - (wins.get(a) ?? 0),
+    );
+  return [...podium, ...rest].map((x) => playerOf.get(x)).filter((x): x is string => !!x);
 }

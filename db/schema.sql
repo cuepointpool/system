@@ -486,7 +486,7 @@ CREATE TABLE IF NOT EXISTS friend_tournaments (
   format           TEXT NOT NULL CHECK (format IN ('1v1','2v2')),
   players_per_team INT  NOT NULL CHECK (players_per_team > 0),
   capacity_teams   INT  NOT NULL CHECK (capacity_teams BETWEEN 2 AND 64),
-  seeding          TEXT NOT NULL DEFAULT 'random' CHECK (seeding IN ('random','ranking')),
+  seeding          TEXT NOT NULL DEFAULT 'random' CHECK (seeding IN ('random','ranking','manual')),
   status           TEXT NOT NULL DEFAULT 'registration_open'
                    CHECK (status IN ('registration_open','in_progress','completed','cancelled')),
   champion_team_id TEXT,
@@ -802,6 +802,18 @@ CREATE INDEX IF NOT EXISTS club_members_player_idx ON club_members (player_id);
 
 -- what the system moved after the last finished week (2026-11-07 migration)
 ALTER TABLE clubs ADD COLUMN IF NOT EXISTS last_moves JSONB;
+
+-- club final settings (2026-11-07 migration)
+ALTER TABLE clubs ADD COLUMN IF NOT EXISTS final_settings JSONB NOT NULL DEFAULT '{}';
+
+-- players asking to join (2026-11-07 migration)
+CREATE TABLE IF NOT EXISTS club_join_requests (
+  club_id    TEXT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  player_id  TEXT NOT NULL REFERENCES player_profiles(id) ON DELETE CASCADE,
+  message    TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (club_id, player_id)
+);
 
 -- a club week = one league tournament per group
 ALTER TABLE friend_tournaments

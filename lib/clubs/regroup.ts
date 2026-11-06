@@ -11,7 +11,8 @@
    new group 2 is the bottom 4 of both.
 
    Members who didn't play that week (joined late, sat out) stay where
-   they are. A group that didn't play has no moves at its boundaries.
+   they are. A group that didn't play that week (empty or too small) is
+   skipped: its neighbours above and below swap players with each other.
    ============================================================ */
 
 export interface GroupWeek {
@@ -38,7 +39,8 @@ export function movesAcross(upperSize: number, lowerSize: number, moveCount: num
 }
 
 export function planMoves(groups: GroupWeek[], moveCount: number | null): Move[] {
-  const sorted = [...groups].sort((a, b) => a.group - b.group);
+  // only groups that played this week; a group that sat out is stepped over
+  const sorted = [...groups].sort((a, b) => a.group - b.group).filter((g) => g.order);
   const moves: Move[] = [];
   for (let i = 0; i + 1 < sorted.length; i++) {
     const up = sorted[i];
@@ -57,6 +59,7 @@ export function planMoves(groups: GroupWeek[], moveCount: number | null): Move[]
 
 /** default group names: 1 = "Pro", then "Group 2", "Group 3", … */
 export function groupLabel(names: string[], group: number): string {
+  if (group === 0) return "Club final";
   const n = (names[group - 1] ?? "").trim();
   if (n) return n;
   return group === 1 ? "Pro" : `Group ${group}`;

@@ -72,6 +72,21 @@ test("a group that didn't play has no moves; late joiners stay put", () => {
     null,
   );
   assert.equal(moves.length, 0);
+  // a middle group that sat out is stepped over: groups 1 and 3 swap with each other
+  const skip = planMoves(
+    [
+      { group: 1, members: ids("a", 4), order: ids("a", 4) },
+      { group: 2, members: ["x1", "x2"], order: null },
+      { group: 3, members: ids("c", 4), order: ids("c", 4) },
+    ],
+    null,
+  );
+  assert.deepEqual(skip.map((m) => [m.playerId, m.from, m.to]), [
+    ["a3", 1, 3],
+    ["a4", 1, 3],
+    ["c1", 3, 1],
+    ["c2", 3, 1],
+  ]);
   const m2 = planMoves(
     [
       { group: 1, members: [...ids("p", 4), "late"], order: ids("p", 4) },

@@ -15,7 +15,8 @@
 import { cookies } from "next/headers";
 import { CLUB_COOKIE, createSessionToken, hashPassword, readSession, verifyPassword } from "../auth";
 import { query, queryOne, transaction } from "../pg";
-import { clubFinishOrder, createClubLeagues, type Actor } from "../friends/store";
+import { clubFinishOrder, createClubLeagues, FriendsError, type Actor } from "../friends/store";
+import { CHANNEL } from "../friends/realtime";
 import { normalizeSettings, type TournamentSettings } from "../friends/structure";
 import { groupLabel, MAX_CLUB_GROUPS, planMoves, type Move } from "./regroup";
 
@@ -43,6 +44,7 @@ interface ClubRow {
   league_settings: Partial<TournamentSettings> | null;
   moves_applied_week: number;
   last_moves: LastMoves | null;
+  final_settings: Partial<FinalSettings> | null;
   created_at: Date;
 }
 
@@ -254,6 +256,28 @@ export interface ClubView {
   running: boolean;
   /** what the system moved after the last finished week (undo-able) */
   lastMoves: LastMoves | null;
+  /** players asking to join */
+  requests: JoinRequest[];
+  /** after the groups: the top players play a club final */
+  finalSettings: FinalSettings;
+}
+
+/** the optional club final: top players of every group, once the groups are done */
+export interface FinalSettings {
+  enabled: boolean;
+  /** how many from each group go through */
+  perGroup: number;
+  settings: TournamentSettings;
+}
+
+export function normalizeFinal(raw: unknown): FinalSettings {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const n = Math.trunc(Number(r.perGroup));
+  return {
+    enabled: r.enabled === true,
+    perGroup: Number.isInteger(n) && n >= 1 && n <= 8 ? n : 2,
+    settings: normalizeSettings(r.settings ?? { kind: "knockout", thirdPlace: true }),
+  };
 }
 
 /** players the system moved between groups after a finished week */
@@ -372,12 +396,12 @@ async function proposal(r: ClubRow, members: ClubMemberView[], last: ClubWeek | 
  * down, top players up) — exactly once per week, whoever looks first.
  */
 export async function getClubView(clubId: string): Promise<ClubView> {
-  await autoRegroup(clubId);
+  await advanceWeek(clubId);
   return buildView(await clubRow(clubId));
 }
 
 async function buildView(r: ClubRow): Promise<ClubView> {
-  const [members, weeks] = await Promise.all([loadMembers(r.id), loadWeeks(r)]);
+  const [members, weeks, requests] = await Promise.all([loadMembers(r.id), loadWeeks(r), listJoinRequests(r.id)]);
   const last = weeks[0];
   return {
     id: r.id,
@@ -390,11 +414,13 @@ async function buildView(r: ClubRow): Promise<ClubView> {
       members: members.filter((m) => m.group === group),
     })),
     moveCount: r.move_count,
-    leagueSettings: normalizeSettings({ ...(r.league_settings ?? {}), kind: "league" }),
+    leagueSettings: normalizeSettings({ kind: "league", ...(r.league_settings ?? {}) }),
+    finalSettings: normalizeFinal(r.final_settings),
     weeks,
     nextWeek: (last?.week ?? 0) + 1,
     running: !!last && !last.done,
     lastMoves: r.last_moves && last && r.last_moves.week === last.week ? r.last_moves : null,
+    requests,
   };
 }
 
@@ -429,6 +455,50 @@ export async function autoRegroup(clubId: string): Promise<boolean> {
   });
 }
 
+/**
+ * Move a finished stage of the week on: when every group is done, start
+ * the club final (if the club plays one); when everything is done, regroup.
+ */
+export async function advanceWeek(clubId: string): Promise<void> {
+  await startFinalIfDue(clubId);
+  await autoRegroup(clubId);
+}
+
+const isOpen = (t: ClubTournamentRef) => t.status !== "completed" && t.status !== "cancelled";
+
+async function startFinalIfDue(clubId: string): Promise<void> {
+  const r = await clubRow(clubId);
+  const last = (await loadWeeks(r))[0];
+  if (!last || r.moves_applied_week >= last.week) return;
+  const fin = normalizeFinal(r.final_settings);
+  if (!fin.enabled || last.tournaments.some((t) => t.group === 0)) return;
+  const groups = last.tournaments.filter((t) => t.group > 0).sort((a, b) => a.group - b.group);
+  if (groups.some(isOpen)) return;
+  const orders: string[][] = [];
+  for (const t of groups) if (t.status === "completed") orders.push((await clubFinishOrder(t.id)) ?? []);
+  // every group's winner first, then every runner-up… so winners are kept apart
+  const qualifiers: string[] = [];
+  for (let place = 0; place < fin.perGroup; place++)
+    for (const o of orders) if (o[place] && !qualifiers.includes(o[place])) qualifiers.push(o[place]);
+  if (qualifiers.length < MIN_GROUP_PLAYERS) return; // too few to play a final: the week just ends
+  const base = { clubId, hostId: r.host_id, clubName: r.name, week: last.week, seeding: "manual" as const };
+  const groupsArg = [{ group: 0, name: "Club final", playerIds: qualifiers }];
+  try {
+    await createClubLeagues({ ...base, settings: fin.settings, groups: groupsArg });
+  } catch (e) {
+    if (e instanceof FriendsError && e.status === 409) return; // someone else just started it
+    if (!(e instanceof FriendsError)) throw e;
+    // that format doesn't fit this many players: fall back to a plain knockout
+    await createClubLeagues({
+      ...base,
+      settings: { kind: "knockout", thirdPlace: true, bestOf: fin.settings.bestOf },
+      groups: groupsArg,
+    }).catch((err) => {
+      if (!(err instanceof FriendsError && err.status === 409)) throw err;
+    });
+  }
+}
+
 /** after a result: if it finished a club week, regroup now */
 export async function regroupAfterGame(gameId: string): Promise<void> {
   const r = await queryOne<{ club_id: string }>(
@@ -436,7 +506,7 @@ export async function regroupAfterGame(gameId: string): Promise<void> {
       WHERE g.id = $1 AND t.club_id IS NOT NULL`,
     [gameId],
   );
-  if (r) await autoRegroup(r.club_id).catch((e) => console.error("[club] regroup failed", e));
+  if (r) await advanceWeek(r.club_id).catch((e) => console.error("[club] advancing the week failed", e));
 }
 
 /** clubs a player belongs to (for their profile / dashboard) */
@@ -447,6 +517,47 @@ export async function clubsOfPlayer(playerId: string): Promise<{ slug: string; n
     [playerId],
   );
   return rows.map((r) => ({ slug: r.slug, name: r.name, group: groupLabel(r.group_names ?? [], r.group_no) }));
+}
+
+/** every registered Cue Point player, for the club admin to pick from */
+export interface CuePointPlayer {
+  id: string;
+  slug: string;
+  nickname: string;
+  fullName: string;
+  avatar: string | null;
+  joinedAt: string;
+  /** their group in this club, or null if not a member */
+  group: number | null;
+}
+
+export async function listCuePointPlayers(clubId: string): Promise<CuePointPlayer[]> {
+  const rows = await query<{
+    id: string;
+    slug: string;
+    nickname: string;
+    full_name: string;
+    avatar: string | null;
+    joined_at: Date;
+    group_no: number | null;
+  }>(
+    `SELECT p.id, p.slug, p.nickname, p.full_name, p.avatar, p.joined_at, m.group_no
+       FROM player_profiles p
+       LEFT JOIN club_members m ON m.player_id = p.id AND m.club_id = $1
+      WHERE p.role = 'player'
+      ORDER BY lower(p.nickname)
+      LIMIT 2000`,
+    [clubId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    slug: r.slug,
+    nickname: r.nickname,
+    fullName: r.full_name,
+    avatar: r.avatar,
+    joinedAt: new Date(r.joined_at).toISOString(),
+    group: r.group_no,
+  }));
 }
 
 /* ------------------------------ club admin actions ------------------------------ */
@@ -468,6 +579,103 @@ export async function addMember(clubId: string, playerId: string, group: unknown
     [clubId, playerId, g],
   );
   if (!res.length) throw new ClubError(409, "That player is already in the club.");
+  // if they had asked to join, that's answered now — tell them
+  const asked = await query(`DELETE FROM club_join_requests WHERE club_id = $1 AND player_id = $2 RETURNING 1`, [
+    clubId,
+    playerId,
+  ]);
+  await notifyPlayer(
+    playerId,
+    asked.length
+      ? `${r.name} accepted you — you're in ${groupLabel(r.group_names ?? [], g)}.`
+      : `${r.name} added you to ${groupLabel(r.group_names ?? [], g)}.`,
+    `/clubs/${r.slug}`,
+  );
+}
+
+async function notifyPlayer(playerId: string, message: string, href: string) {
+  const id = "fn_" + rid();
+  await query(`INSERT INTO friend_notifications (id, player_id, kind, message, href) VALUES ($1,$2,'club',$3,$4)`, [
+    id,
+    playerId,
+    message,
+    href,
+  ]).catch((e) => console.error("[club] notify failed", e));
+  // the navbar bell updates live (same channel as friend play)
+  await query(`SELECT pg_notify($1, $2)`, [CHANNEL, JSON.stringify({ t: [`user:${playerId}`] })]).catch(() => {});
+}
+
+/* ------------------------------ join requests ------------------------------ */
+
+export interface JoinRequest {
+  playerId: string;
+  slug: string;
+  nickname: string;
+  fullName: string;
+  avatar: string | null;
+  message: string;
+  createdAt: string;
+}
+
+/** a signed-in player asks to join (from the club page) */
+export async function requestToJoin(clubId: string, playerId: string, message: unknown): Promise<void> {
+  const r = await clubRow(clubId);
+  if (!r.active) throw new ClubError(404, "Club not found");
+  const p = await queryOne<{ role: string }>(`SELECT role FROM player_profiles WHERE id = $1`, [playerId]);
+  if (!p || p.role !== "player") throw new ClubError(403, "Only Cue Point player accounts can join a club.");
+  const member = await queryOne(`SELECT 1 FROM club_members WHERE club_id = $1 AND player_id = $2`, [clubId, playerId]);
+  if (member) throw new ClubError(409, "You're already in this club.");
+  await query(
+    `INSERT INTO club_join_requests (club_id, player_id, message) VALUES ($1,$2,$3)
+     ON CONFLICT (club_id, player_id) DO UPDATE SET message = EXCLUDED.message`,
+    [clubId, playerId, cleanText(message, 200)],
+  );
+}
+
+export async function cancelJoinRequest(clubId: string, playerId: string): Promise<void> {
+  await query(`DELETE FROM club_join_requests WHERE club_id = $1 AND player_id = $2`, [clubId, playerId]);
+}
+
+/** club admin: turn a request down */
+export async function declineJoinRequest(clubId: string, playerId: string): Promise<void> {
+  const r = await clubRow(clubId);
+  const res = await query(`DELETE FROM club_join_requests WHERE club_id = $1 AND player_id = $2 RETURNING 1`, [
+    clubId,
+    playerId,
+  ]);
+  if (!res.length) throw new ClubError(404, "That request is no longer there.");
+  await notifyPlayer(playerId, `${r.name} couldn't take you in this time.`, `/clubs/${r.slug}`);
+}
+
+export async function listJoinRequests(clubId: string): Promise<JoinRequest[]> {
+  const rows = await query<{
+    player_id: string;
+    slug: string;
+    nickname: string;
+    full_name: string;
+    avatar: string | null;
+    message: string;
+    created_at: Date;
+  }>(
+    `SELECT j.player_id, p.slug, p.nickname, p.full_name, p.avatar, j.message, j.created_at
+       FROM club_join_requests j JOIN player_profiles p ON p.id = j.player_id
+      WHERE j.club_id = $1 ORDER BY j.created_at`,
+    [clubId],
+  );
+  return rows.map((x) => ({
+    playerId: x.player_id,
+    slug: x.slug,
+    nickname: x.nickname,
+    fullName: x.full_name,
+    avatar: x.avatar,
+    message: x.message,
+    createdAt: new Date(x.created_at).toISOString(),
+  }));
+}
+
+/** has this player asked to join? */
+export async function hasRequested(clubId: string, playerId: string): Promise<boolean> {
+  return !!(await queryOne(`SELECT 1 FROM club_join_requests WHERE club_id = $1 AND player_id = $2`, [clubId, playerId]));
 }
 
 export async function moveMember(clubId: string, playerId: string, group: unknown): Promise<void> {
@@ -488,7 +696,13 @@ export async function removeMember(clubId: string, playerId: string): Promise<vo
 /** how many groups, their names, how many move each week, the league rules */
 export async function updateClubSettings(
   clubId: string,
-  input: { groupCount?: unknown; groupNames?: unknown; moveCount?: unknown; leagueSettings?: unknown },
+  input: {
+    groupCount?: unknown;
+    groupNames?: unknown;
+    moveCount?: unknown;
+    leagueSettings?: unknown;
+    finalSettings?: unknown;
+  },
 ): Promise<void> {
   await transaction(async (c) => {
     const r = (await c.query<ClubRow>(`SELECT * FROM clubs WHERE id = $1 FOR UPDATE`, [clubId])).rows[0];
@@ -513,8 +727,12 @@ export async function updateClubSettings(
       await c.query(`UPDATE clubs SET move_count = $2 WHERE id = $1`, [clubId, n]);
     }
     if (input.leagueSettings !== undefined) {
-      const s = normalizeSettings({ ...(input.leagueSettings as object), kind: "league" });
+      const s = normalizeSettings(input.leagueSettings);
       await c.query(`UPDATE clubs SET league_settings = $2 WHERE id = $1`, [clubId, JSON.stringify(s)]);
+    }
+    if (input.finalSettings !== undefined) {
+      const f = normalizeFinal(input.finalSettings);
+      await c.query(`UPDATE clubs SET final_settings = $2 WHERE id = $1`, [clubId, JSON.stringify(f)]);
     }
   });
 }
@@ -563,10 +781,26 @@ export async function swapMembers(clubId: string, a: string, b: string): Promise
   });
 }
 
-/** start next week: a league in every group */
-export async function startWeek(clubId: string): Promise<string[]> {
+/** fewest players a group needs to play its league that week */
+export const MIN_GROUP_PLAYERS = 3;
+
+/**
+ * Start next week: a league in every group that has enough players. Groups
+ * that are empty or too small sit the week out — the caller must confirm
+ * that with `allowSkip` (the first try answers 409 with the list).
+ */
+export async function startWeek(clubId: string, allowSkip = false): Promise<string[]> {
   const view = await getClubView(clubId);
   if (view.running) throw new ClubError(409, `Week ${view.nextWeek - 1} is still being played.`);
+  const playing = view.groups.filter((g) => g.members.length >= MIN_GROUP_PLAYERS);
+  const sitting = view.groups.filter((g) => g.members.length < MIN_GROUP_PLAYERS);
+  if (!playing.length)
+    throw new ClubError(400, `No group has ${MIN_GROUP_PLAYERS} players yet — add players first.`);
+  if (sitting.length && !allowSkip)
+    throw new ClubError(
+      409,
+      `${sitting.map((g) => g.name).join(", ")} ${sitting.length === 1 ? "has" : "have"} fewer than ${MIN_GROUP_PLAYERS} players and will sit this week out.`,
+    );
   const r = await clubRow(clubId);
   return createClubLeagues({
     clubId,
@@ -574,6 +808,6 @@ export async function startWeek(clubId: string): Promise<string[]> {
     clubName: r.name,
     week: view.nextWeek,
     settings: view.leagueSettings,
-    groups: view.groups.map((g) => ({ group: g.group, name: g.name, playerIds: g.members.map((m) => m.id) })),
+    groups: playing.map((g) => ({ group: g.group, name: g.name, playerIds: g.members.map((m) => m.id) })),
   });
 }

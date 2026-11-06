@@ -203,7 +203,7 @@ export interface TournamentView {
   /** no player limit (official tournaments): capacityTeams is just a marker */
   noLimit: boolean;
   requiredPlayers: number;
-  seeding: "random" | "ranking";
+  seeding: "random" | "ranking" | "manual";
   status: TournamentStatus;
   organizer: PlayerRef;
   /** hosted by Cue Point — null for a friends tournament */
