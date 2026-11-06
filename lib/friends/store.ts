@@ -61,6 +61,7 @@ import {
 import { CHANNEL } from "./realtime";
 import type {
   BracketRound,
+  ClubInfo,
   FriendPointsSummary,
   PendingTie,
   StandingView,
@@ -83,6 +84,7 @@ import type {
   TournamentViewer,
 } from "./types";
 import { validateGameRoster, validateTeamSize } from "./validate";
+import { groupLabel } from "../clubs/regroup";
 
 /* -------------------------------------------------------------------- */
 /*  Errors, actor, small helpers                                       */
@@ -98,14 +100,16 @@ export class FriendsError extends Error {
   }
 }
 
-/** who is asking. Staff/admin can moderate; only players can create/play. */
+/** who is asking. Staff/admin can moderate; only players can create/play.
+ *  "club" = a partner club's admin, acting as the club's host profile: the
+ *  organizer of that club's tournaments and nothing else. */
 export interface Actor {
   id: string;
-  role: "player" | "staff" | "admin";
+  role: "player" | "staff" | "admin" | "club";
   nickname: string;
 }
 
-const isMod = (a: Actor) => a.role !== "player";
+const isMod = (a: Actor) => a.role === "staff" || a.role === "admin";
 
 const MAX_OPEN_GAMES_PER_ORGANIZER = 10;
 const MAX_OPEN_TOURNAMENTS_PER_ORGANIZER = 5;
@@ -235,6 +239,10 @@ interface TournamentRow {
   start_at: Date | null;
   registration_deadline: Date | null;
   poster: string | null;
+  /** a partner club's weekly group league */
+  club_id: string | null;
+  club_week: number | null;
+  club_group: number | null;
 }
 
 const settingsOf = (t: Pick<TournamentRow, "kind" | "settings">): TournamentSettings =>
@@ -457,7 +465,8 @@ async function gameViews(
       `SELECT tournament_id AS tid FROM friend_team_members
         WHERE player_id = $1 AND tournament_id = ANY($2)
        UNION
-       SELECT id FROM friend_tournaments WHERE organizer_id = $1 AND id = ANY($2)`,
+       SELECT id FROM friend_tournaments
+        WHERE (organizer_id = $1 OR club_id IS NOT NULL) AND id = ANY($2)`,
       [actor.id, tournamentIds],
     ))
       viewerTournaments.add(r.tid);
@@ -590,7 +599,8 @@ export async function getTournamentView(
   const isOrganizer = t.organizer_id === actor.id || (t.official && isMod(actor));
   const myTeam = actor.id ? (teams.find((x) => x.members.some((m) => m.id === actor.id)) ?? null) : null;
   const myMember = myTeam?.members.find((m) => m.id === actor.id) ?? null;
-  if (!t.official && !isOrganizer && !myMember && !isMod(actor)) return null;
+  // club leagues are public too: anyone can follow the groups
+  if (!t.official && !t.club_id && !isOrganizer && !myMember && !isMod(actor)) return null;
 
   const gameRows = await pooled<GameRow>(
     `SELECT * FROM friend_games WHERE tournament_id = $1 ORDER BY round, position`,
@@ -746,6 +756,7 @@ export async function getTournamentView(
     status: t.status,
     organizer: org ?? GHOST,
     official: t.official ? officialInfo(t, teams.length) : null,
+    club: t.club_id ? await clubInfo(t) : null,
     teams,
     teamsComplete: teams.filter((x) => x.complete).length,
     playersJoined: teams.reduce(
@@ -1184,7 +1195,8 @@ export async function canSubscribe(actor: Actor, topic: string): Promise<boolean
       `SELECT 1 AS ok FROM friend_games g
         WHERE g.id = $1
           AND (g.organizer_id = $2
-               OR EXISTS (SELECT 1 FROM friend_tournaments ot WHERE ot.id = g.tournament_id AND ot.official)
+               OR EXISTS (SELECT 1 FROM friend_tournaments ot
+                           WHERE ot.id = g.tournament_id AND (ot.official OR ot.club_id IS NOT NULL))
                OR EXISTS (SELECT 1 FROM friend_team_members m
                            WHERE m.game_id = g.id AND m.player_id = $2))`,
       [id, actor.id],
@@ -1195,7 +1207,7 @@ export async function canSubscribe(actor: Actor, topic: string): Promise<boolean
     const rows = await pooled<{ ok: number }>(
       `SELECT 1 AS ok FROM friend_tournaments t
         WHERE t.id = $1
-          AND (t.official OR t.organizer_id = $2
+          AND (t.official OR t.club_id IS NOT NULL OR t.organizer_id = $2
                OR EXISTS (SELECT 1 FROM friend_team_members m
                            WHERE m.tournament_id = t.id AND m.player_id = $2))`,
       [id, actor.id],
@@ -1303,8 +1315,13 @@ async function teamPlayerIds(c: PoolClient, teamId: string | null): Promise<stri
 async function syncInhouseMatch(c: PoolClient, gameId: string) {
   await c.query(`DELETE FROM matches WHERE friend_game_id = $1`, [gameId]);
   const [g] = (
-    await c.query<GameRow & { t_eligible: boolean | null; t_official: boolean | null; t_name: string | null }>(
-      `SELECT g.*, (t.points_eligible OR t.official) AS t_eligible, t.official AS t_official, t.name AS t_name
+    await c.query<
+      GameRow & { t_eligible: boolean | null; t_official: boolean | null; t_club: boolean | null; t_name: string | null }
+    >(
+      // club leagues always count: the club admin enters every result, so
+      // the friends anti-farming cap doesn't apply
+      `SELECT g.*, (t.points_eligible OR t.official OR t.club_id IS NOT NULL) AS t_eligible,
+              t.official AS t_official, (t.club_id IS NOT NULL) AS t_club, t.name AS t_name
          FROM friend_games g LEFT JOIN friend_tournaments t ON t.id = g.tournament_id
         WHERE g.id = $1`,
       [gameId],
@@ -1330,11 +1347,12 @@ async function syncInhouseMatch(c: PoolClient, gameId: string) {
        (id, ref, type, player_a_id, player_b_id, score_a, score_b, winner_id, table_name,
         tournament_round, played_at, a_points_before, a_points_after, b_points_before, b_points_after,
         recorded_by, friend_game_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Friends play',$9,$10,$11,$11,$12,$12,'friends',$13)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$14,$9,$10,$11,$11,$12,$12,'friends',$13)`,
     [
       nid("m"),
       "CP-F-" + globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase(),
-      g.t_official ? "tournament" : g.tournament_id ? "ranked" : "casual",
+      // club league matches count as casual games on the in-house board
+      g.t_official ? "tournament" : g.t_club ? "casual" : g.tournament_id ? "ranked" : "casual",
       a,
       b,
       g.score_a ?? (winner === a ? 1 : 0),
@@ -1345,6 +1363,7 @@ async function syncInhouseMatch(c: PoolClient, gameId: string) {
       pa,
       pb,
       g.id,
+      g.t_club ? "Club league" : "Friends play",
     ],
   );
 }
@@ -2647,7 +2666,8 @@ async function insertTeam(
   const teamId = nid("ft");
   await c.query(`INSERT INTO friend_teams (id, tournament_id) VALUES ($1,$2)`, [teamId, t.id]);
   for (const pid of playerIds) {
-    const self = pid === t.organizer_id || t.official;
+    // official: players signed themselves up; club: the club put them in their group
+    const self = pid === t.organizer_id || t.official || !!t.club_id;
     await c.query(
       `INSERT INTO friend_team_members
          (team_id, player_id, tournament_id, status, invited_by, responded_at)
@@ -3302,7 +3322,11 @@ async function seedTeams(c: PoolClient, t: TournamentRow, teamIds: string[]): Pr
  * gaps become BYEs.
  */
 export async function startTournament(tournamentId: string, actor: Actor, force: boolean) {
-  await transaction(async (c) => {
+  await transaction((c) => startLocked(c, tournamentId, actor, force));
+}
+
+async function startLocked(c: PoolClient, tournamentId: string, actor: Actor, force: boolean) {
+  {
     const t = await lockTournament(c, tournamentId);
     assertOrganizer(t, actor);
     assertOpen(t);
@@ -3394,7 +3418,7 @@ export async function startTournament(tournamentId: string, actor: Actor, force:
     for (const team of incomplete)
       for (const m of team.members.filter((x) => !x.guest)) batch.touch(`user:${m.id}`);
     await batch.flush();
-  });
+  }
 }
 
 function startMessage(t: TournamentRow): string {
@@ -3476,3 +3500,120 @@ export async function cancelTournament(tournamentId: string, actor: Actor, code?
   });
 }
 
+
+/* -------------------------------------------------------------------- */
+/*  Partner clubs — a weekly league per group (see lib/clubs/)         */
+/* -------------------------------------------------------------------- */
+
+async function clubInfo(t: TournamentRow): Promise<ClubInfo | null> {
+  const [c] = await pooled<{ slug: string; name: string; group_names: string[] | null }>(
+    `SELECT slug, name, group_names FROM clubs WHERE id = $1`,
+    [t.club_id],
+  );
+  if (!c) return null;
+  const group = t.club_group ?? 1;
+  return {
+    slug: c.slug,
+    name: c.name,
+    week: t.club_week ?? 0,
+    group,
+    groupName: groupLabel(c.group_names ?? [], group),
+  };
+}
+
+export interface ClubLeagueInput {
+  clubId: string;
+  hostId: string;
+  clubName: string;
+  week: number;
+  settings: unknown;
+  groups: { group: number; name: string; playerIds: string[] }[];
+}
+
+/**
+ * One club week: a league per group, every player already in (the club
+ * placed them — nobody has to accept), all started at once. One
+ * transaction: either every group's league starts or none does.
+ */
+export async function createClubLeagues(input: ClubLeagueInput): Promise<string[]> {
+  const actor: Actor = { id: input.hostId, role: "club", nickname: input.clubName };
+  const settings = normalizeSettings({ ...(input.settings as object), kind: "league" });
+  for (const g of input.groups) {
+    if (g.playerIds.length < MIN_TEAMS_TO_START)
+      throw new FriendsError(
+        400,
+        `${g.name} has ${g.playerIds.length} player${g.playerIds.length === 1 ? "" : "s"} — at least ${MIN_TEAMS_TO_START} are needed for a league.`,
+      );
+    const problem = validateSettings(settings, g.playerIds.length, true);
+    if (problem) throw new FriendsError(400, `${g.name}: ${problem}`);
+  }
+  return transaction(async (c) => {
+    // one week at a time: lock the club, then make sure this week is new
+    await c.query(`SELECT 1 FROM clubs WHERE id = $1 FOR UPDATE`, [input.clubId]);
+    const dup = await c.query(`SELECT 1 FROM friend_tournaments WHERE club_id = $1 AND club_week = $2`, [
+      input.clubId,
+      input.week,
+    ]);
+    if (dup.rowCount) throw new FriendsError(409, "This week has already started.");
+    const ids: string[] = [];
+    for (const g of input.groups) {
+      const id = nid("ftn");
+      await c.query(
+        `INSERT INTO friend_tournaments
+           (id, name, organizer_id, format, players_per_team, capacity_teams, seeding, kind, settings,
+            club_id, club_week, club_group)
+         VALUES ($1,$2,$3,'1v1',1,$4,'random','league',$5,$6,$7,$8)`,
+        [
+          id,
+          cleanName(`${input.clubName} · Week ${input.week} · ${g.name}`, "Club league"),
+          input.hostId,
+          NO_LIMIT,
+          JSON.stringify(settings),
+          input.clubId,
+          input.week,
+          g.group,
+        ],
+      );
+      const t = await lockTournament(c, id);
+      const batch = new Batch(c);
+      for (const pid of g.playerIds) {
+        await checkNewTeam(c, t, [pid]);
+        await insertTeam(c, batch, t, [pid], actor);
+      }
+      await batch.flush();
+      await startLocked(c, id, actor, true);
+      ids.push(id);
+    }
+    return ids;
+  });
+}
+
+/**
+ * Where everyone finished in a completed club league, best first (player
+ * ids): the podium from the final rounds, then the table. null while the
+ * league is still being played (or was cancelled).
+ */
+export async function clubFinishOrder(tournamentId: string): Promise<string[] | null> {
+  const [t] = await pooled<TournamentRow>(`SELECT * FROM friend_tournaments WHERE id = $1`, [tournamentId]);
+  if (!t || t.status !== "completed") return null;
+  const [games, members, teams] = await Promise.all([
+    pooled<GameRow>(`SELECT * FROM friend_games WHERE tournament_id = $1 ORDER BY round, position`, [t.id]),
+    pooled<{ team_id: string; player_id: string }>(
+      `SELECT team_id, player_id FROM friend_team_members WHERE tournament_id = $1`,
+      [t.id],
+    ),
+    pooled<{ id: string; seed: number | null }>(
+      `SELECT id, seed FROM friend_teams WHERE tournament_id = $1 ORDER BY created_at, id`,
+      [t.id],
+    ),
+  ]);
+  const playerOf = new Map(members.map((m) => [m.team_id, m.player_id]));
+  const tables = buildTables(t, seedOrderOf(teams), games);
+  const p = placementsFrom(t, games, tables);
+  const teamOrder = uniq(
+    [p.champion, p.runnerUp, p.third, ...p.semis, ...(tables[0]?.rows ?? []).map((r) => r.teamId)].filter(
+      (x): x is string => !!x,
+    ),
+  );
+  return teamOrder.map((x) => playerOf.get(x)).filter((x): x is string => !!x);
+}

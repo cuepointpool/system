@@ -15,7 +15,7 @@ const MAX_AGE_MS = 25 * 60_000; // recycle; the client reconnects and refetches
  * topics, each authorised before it is accepted.
  */
 export async function GET(req: NextRequest) {
-  const actor = await getActor();
+  const actor = await getActor(req);
   if (!actor) return json({ error: "Sign in first." }, 401);
 
   const topics = new Set<string>([`user:${actor.id}`]);

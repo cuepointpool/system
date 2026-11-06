@@ -75,7 +75,7 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
     return r.ok;
   }
 
-  const home = t.official ? "/tournaments" : "/play";
+  const home = t.club ? `/clubs/${t.club.slug}` : t.official ? "/tournaments" : "/play";
   if (gone) {
     return (
       <Notice tone="warn">
@@ -145,6 +145,7 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wide text-[#c4b5fd]">
                 {t.official ? "Cue Point tournament · " : ""}
+                {t.club ? `${t.club.name} · Week ${t.club.week} · ${t.club.groupName} · ` : ""}
                 {statusWords(t)}
               </p>
               <h1 className="mt-1 font-display text-2xl font-bold text-white sm:text-3xl">{t.name}</h1>
@@ -309,7 +310,7 @@ export function TournamentLobby({ initial, meId }: { initial: TournamentView; me
 
         <div className="flex flex-wrap items-center gap-4 border-t border-white/10 pt-5">
           <Link href={home} className="text-sm text-mist hover:text-white">
-            {t.official ? "← All tournaments" : "← Back to Play"}
+            {t.club ? `← ${t.club.name}` : t.official ? "← All tournaments" : "← Back to Play"}
           </Link>
           {open && v.canLeave && !v.isOrganizer && !v.invited && (
             <button

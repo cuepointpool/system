@@ -10,9 +10,11 @@ export async function GET(
 ) {
   const { id } = await params;
   // official tournaments are public — watching one needs no account
-  if (!(await getActor())) {
+  if (!(await getActor(req))) {
     const tournament = await getTournamentView(id, { id: "", role: "player", nickname: "" });
-    return tournament?.official ? json({ tournament }) : json({ error: "Sign in to play with friends." }, 401);
+    return tournament?.official || tournament?.club
+      ? json({ tournament })
+      : json({ error: "Sign in to play with friends." }, 401);
   }
   return withActor(req, {}, async (actor) => {
     const tournament = await getTournamentView(id, actor);

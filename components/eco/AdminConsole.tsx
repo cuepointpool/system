@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Tabs } from "./Primitives";
 import { AccountsApp } from "./accounts/AccountsApp";
+import { ClubsAdminTab } from "./ClubsAdminTab";
 import type { OfficialListItem } from "@/lib/friends/types";
 import { cn, formatDateShort, label12h, timeAgo } from "@/lib/utils";
 import {
@@ -42,6 +43,7 @@ type Tab =
   | "bookings"
   | "finance"
   | "campaign"
+  | "clubs"
   | "security"
   | "audit";
 
@@ -161,6 +163,7 @@ export function AdminConsole() {
               ? [
                   { value: "finance", label: "Accounts" },
                   { value: "campaign", label: "Campaign" },
+                  { value: "clubs", label: "Clubs" },
                 ]
               : []),
             { value: "audit", label: "Audit" },
@@ -186,6 +189,7 @@ export function AdminConsole() {
             <p className="text-sm text-mist">Accounts are admin-only.</p>
           ))}
         {tab === "campaign" && me?.role === "admin" && <CampaignCodeTab />}
+        {tab === "clubs" && me?.role === "admin" && <ClubsAdminTab />}
         {tab === "audit" && <AuditTab headers={headers} />}
         {tab === "security" && isStaff && <SecurityTab />}
       </div>

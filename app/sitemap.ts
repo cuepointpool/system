@@ -12,6 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/players", priority: 0.5, freq: "daily" },
     { path: "/matches", priority: 0.5, freq: "daily" },
     { path: "/tournaments", priority: 0.6, freq: "weekly" },
+    { path: "/clubs", priority: 0.5, freq: "weekly" },
     { path: "/gallery", priority: 0.5, freq: "monthly" },
   ];
   return routes.map((r) => ({

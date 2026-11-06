@@ -18,6 +18,8 @@ const SECRET =
 export const SESSION_COOKIE = "cp_session";
 /** Separate session for business-partner logins (see lib/partners.ts). */
 export const PARTNER_COOKIE = "cp_partner";
+/** Separate session for partner-club admins (see lib/clubs/store.ts). */
+export const CLUB_COOKIE = "cp_club";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 /* ---- passwords ---- */

@@ -99,6 +99,7 @@ export const MAIN_NAV: NavItem[] = [
       { label: "Rankings", href: "/rankings", desc: "The Cue Point leaderboard" },
       { label: "Players", href: "/players", desc: "Meet the community" },
       { label: "Matches", href: "/matches", desc: "Every recorded frame" },
+      { label: "Clubs", href: "/clubs", desc: "Partner clubs & their weekly leagues" },
       { label: "Tables & rates", href: "/#tables", desc: "What's on the floor" },
       { label: "Gallery", href: "/gallery", desc: "Photos from the room" },
     ],

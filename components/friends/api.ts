@@ -8,9 +8,18 @@ export interface ApiResult<T = Record<string, unknown>> {
   details: Record<string, unknown> | null;
 }
 
+/* A partner club's admin pages act as the club (see lib/friends/http.ts). */
+let actAsClub = false;
+export function setActAsClub(on: boolean) {
+  actAsClub = on;
+}
+export const isActingAsClub = () => actAsClub;
+
 async function call<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
-    const res = await fetch(path, { cache: "no-store", ...init });
+    const headers = new Headers(init?.headers);
+    if (actAsClub) headers.set("x-act-as", "club");
+    const res = await fetch(path, { cache: "no-store", ...init, headers });
     const data = (await res.json().catch(() => ({}))) as T & {
       error?: string;
       details?: Record<string, unknown>;

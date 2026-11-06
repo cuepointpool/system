@@ -146,6 +146,15 @@ export interface OfficialInfo {
   poster: string | null;
 }
 
+/** which club week / group a club league belongs to */
+export interface ClubInfo {
+  slug: string;
+  name: string;
+  week: number;
+  group: number;
+  groupName: string;
+}
+
 export interface BracketRound {
   round: number;
   name: string;
@@ -199,6 +208,8 @@ export interface TournamentView {
   organizer: PlayerRef;
   /** hosted by Cue Point — null for a friends tournament */
   official: OfficialInfo | null;
+  /** a partner club's weekly group league — null otherwise */
+  club: ClubInfo | null;
   teams: TeamView[];
   /** teams that have every seat filled by an accepted player */
   teamsComplete: number;

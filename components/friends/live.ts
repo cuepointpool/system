@@ -16,6 +16,7 @@
    ============================================================ */
 
 import { useCallback, useEffect, useRef } from "react";
+import { isActingAsClub } from "./api";
 
 interface Listener {
   topics: Set<string>;
@@ -72,7 +73,9 @@ function sync() {
 
   closeStream();
   openKey = key;
-  const source = new EventSource(`/api/friends/stream?topics=${encodeURIComponent(key)}`);
+  const source = new EventSource(
+    `/api/friends/stream?topics=${encodeURIComponent(key)}${isActingAsClub() ? "&as=club" : ""}`,
+  );
   es = source;
   source.addEventListener("hello", () => {
     connected = true;

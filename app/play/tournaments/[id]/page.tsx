@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { TournamentLobby } from "@/components/friends/TournamentLobby";
 import { requirePlayer } from "@/lib/friends/page";
+import { clubSlugOfTournament } from "@/lib/clubs/store";
 import { getTournamentView, officialSlugOf } from "@/lib/friends/store";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,9 @@ export default async function TournamentPage({ params }: { params: Promise<{ id:
   // official tournaments live on their public page (staff run them there too)
   const official = await officialSlugOf(id);
   if (official) redirect(`/tournaments/${official}`);
+  // partner-club leagues live on the club's pages
+  const club = await clubSlugOfTournament(id);
+  if (club) redirect(`/clubs/${club}/tournaments/${id}`);
   const { actor, viewer } = await requirePlayer(`/play/tournaments/${id}`);
   const tournament = await getTournamentView(id, actor);
   if (!tournament) notFound();

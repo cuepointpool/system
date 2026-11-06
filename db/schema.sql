@@ -16,7 +16,7 @@ CREATE SCHEMA public;
 -- ------------------------------------------------------------------ enums ---
 
 CREATE TYPE skill_level     AS ENUM ('Rookie','Amateur','Intermediate','Advanced','Pro');
-CREATE TYPE user_role       AS ENUM ('player','staff','admin');
+CREATE TYPE user_role       AS ENUM ('player','staff','admin','club');
 CREATE TYPE match_type      AS ENUM ('casual','ranked','tournament');
 CREATE TYPE membership_tier AS ENUM ('basic','pro','elite');
 CREATE TYPE membership_status AS ENUM ('active','expired','none');
@@ -767,3 +767,43 @@ DROP TRIGGER IF EXISTS acct_entry_log_no_truncate ON acct_entry_log;
 CREATE TRIGGER acct_entry_log_no_truncate BEFORE TRUNCATE ON acct_entry_log
   FOR EACH STATEMENT EXECUTE FUNCTION forbid_audit_change();
 
+
+-- ---------------------------------------------------------------- clubs ---
+-- (db/migrations/2026-11-06-clubs.sql; user_role already has 'club' above)
+CREATE TABLE IF NOT EXISTS clubs (
+  id               TEXT PRIMARY KEY,
+  slug             TEXT UNIQUE NOT NULL,
+  name             TEXT NOT NULL,
+  -- organizer of the club's tournaments (a player_profiles row with role 'club')
+  host_id          TEXT NOT NULL UNIQUE REFERENCES player_profiles(id),
+  username         TEXT UNIQUE,
+  password_hash    TEXT,
+  session_version  INT  NOT NULL DEFAULT 0,      -- bumped on password change
+  active           BOOLEAN NOT NULL DEFAULT true,
+  group_count      INT  NOT NULL DEFAULT 2 CHECK (group_count BETWEEN 1 AND 12),
+  group_names      JSONB NOT NULL DEFAULT '[]',  -- index 0 = group 1 (top)
+  -- players moving up / down between two neighbouring groups each week;
+  -- NULL = half of the smaller group
+  move_count       INT CHECK (move_count IS NULL OR move_count BETWEEN 0 AND 50),
+  league_settings  JSONB NOT NULL DEFAULT '{}',  -- league options for every group
+  -- the last week whose results were turned into group moves (0 = none)
+  moves_applied_week INT NOT NULL DEFAULT 0,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS club_members (
+  club_id    TEXT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  player_id  TEXT NOT NULL REFERENCES player_profiles(id) ON DELETE CASCADE,
+  group_no   INT  NOT NULL CHECK (group_no BETWEEN 1 AND 12),
+  joined_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (club_id, player_id)
+);
+CREATE INDEX IF NOT EXISTS club_members_player_idx ON club_members (player_id);
+
+-- a club week = one league tournament per group
+ALTER TABLE friend_tournaments
+  ADD COLUMN IF NOT EXISTS club_id    TEXT REFERENCES clubs(id),
+  ADD COLUMN IF NOT EXISTS club_week  INT,
+  ADD COLUMN IF NOT EXISTS club_group INT;
+CREATE INDEX IF NOT EXISTS friend_tournaments_club_idx
+  ON friend_tournaments (club_id, club_week) WHERE club_id IS NOT NULL;

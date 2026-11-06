@@ -4,8 +4,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getViewer } from "../ecosystem/identity";
 import { rateLimit, tooLarge } from "../rate-limit";
 import { FriendsError, type Actor } from "./store";
+import { clubActor, clubViewer } from "../clubs/store";
 
-export async function getActor(): Promise<Actor | null> {
+/**
+ * Who is asking. A partner-club admin's pages send `x-act-as: club` (or
+ * `?as=club` on the event stream); with a valid club sign-in the request
+ * then runs as that club — the organizer of its leagues. Everything else
+ * runs as the signed-in player.
+ */
+export async function getActor(req?: NextRequest): Promise<Actor | null> {
+  if (req && (req.headers.get("x-act-as") === "club" || req.nextUrl.searchParams.get("as") === "club")) {
+    const club = await clubViewer();
+    if (club) return clubActor(club);
+  }
   const v = await getViewer();
   return v ? { id: v.id, role: v.role, nickname: v.nickname } : null;
 }
@@ -35,7 +46,7 @@ export async function withActor(
   opts: { write?: boolean },
   fn: (actor: Actor) => Promise<NextResponse>,
 ): Promise<NextResponse> {
-  const actor = await getActor();
+  const actor = await getActor(req);
   if (!actor) return json({ error: "Sign in to play with friends." }, 401);
   if (opts.write) {
     const big = tooLarge(req, 16_384);

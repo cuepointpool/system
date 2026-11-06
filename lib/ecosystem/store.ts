@@ -381,7 +381,7 @@ export async function getPlayers(
        COALESCE(array_agg(pa.achievement_id) FILTER (WHERE pa.achievement_id IS NOT NULL), '{}') AS achievement_ids
      FROM player_profiles p
      LEFT JOIN player_achievements pa ON pa.player_id = p.id
-     ${opts.includeStaff ? "" : "WHERE p.role = 'player'"}
+     ${opts.includeStaff ? "WHERE p.role <> 'club'" : "WHERE p.role = 'player'"}
      GROUP BY p.id
      ORDER BY p.nickname`,
   );
@@ -396,7 +396,7 @@ export async function getPlayerBySlug(
        COALESCE(array_agg(pa.achievement_id) FILTER (WHERE pa.achievement_id IS NOT NULL), '{}') AS achievement_ids
      FROM player_profiles p
      LEFT JOIN player_achievements pa ON pa.player_id = p.id
-     WHERE p.slug = $1 GROUP BY p.id`,
+     WHERE p.slug = $1 AND p.role <> 'club' GROUP BY p.id`,
     [slug],
   );
   return r ? mapPlayer(r) : undefined;
