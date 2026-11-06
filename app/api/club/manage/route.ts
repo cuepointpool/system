@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   addMember,
-  applyMoves,
   ClubError,
   clubViewer,
   getClubView,
   moveMember,
   removeMember,
   startWeek,
+  swapMembers,
+  undoLastMoves,
   updateClubSettings,
 } from "@/lib/clubs/store";
 import { audit } from "@/lib/ecosystem/store";
@@ -54,11 +55,12 @@ export async function POST(req: NextRequest) {
           leagueSettings: b.leagueSettings,
         });
         break;
-      case "apply-moves":
-        detail = `${await applyMoves(club.id, false)} moved`;
+      case "swap-members":
+        await swapMembers(club.id, str(b.a), str(b.b));
+        detail = `${str(b.a)} <> ${str(b.b)}`;
         break;
-      case "keep-groups":
-        await applyMoves(club.id, true);
+      case "undo-moves":
+        detail = `${await undoLastMoves(club.id)} moved back`;
         break;
       case "start-week":
         detail = (await startWeek(club.id)).join(",");

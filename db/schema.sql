@@ -800,6 +800,9 @@ CREATE TABLE IF NOT EXISTS club_members (
 );
 CREATE INDEX IF NOT EXISTS club_members_player_idx ON club_members (player_id);
 
+-- what the system moved after the last finished week (2026-11-07 migration)
+ALTER TABLE clubs ADD COLUMN IF NOT EXISTS last_moves JSONB;
+
 -- a club week = one league tournament per group
 ALTER TABLE friend_tournaments
   ADD COLUMN IF NOT EXISTS club_id    TEXT REFERENCES clubs(id),

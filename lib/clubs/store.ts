@@ -42,6 +42,7 @@ interface ClubRow {
   move_count: number | null;
   league_settings: Partial<TournamentSettings> | null;
   moves_applied_week: number;
+  last_moves: LastMoves | null;
   created_at: Date;
 }
 
@@ -226,6 +227,9 @@ export interface ClubTournamentRef {
   status: string;
   champion: string | null;
   players: number;
+  /** matches played / total (BYEs left out) */
+  played: number;
+  total: number;
 }
 
 export interface ClubWeek {
@@ -248,10 +252,15 @@ export interface ClubView {
   nextWeek: number;
   /** a week is being played right now */
   running: boolean;
-  /** last week finished and its moves still need applying (or skipping) */
-  movesPending: boolean;
-  /** what applying would do */
-  proposedMoves: (Move & { nickname: string })[];
+  /** what the system moved after the last finished week (undo-able) */
+  lastMoves: LastMoves | null;
+}
+
+/** players the system moved between groups after a finished week */
+export interface LastMoves {
+  week: number;
+  moves: (Move & { nickname: string })[];
+  undone?: boolean;
 }
 
 /** a club league's club page address, if this tournament is one */
@@ -304,11 +313,17 @@ async function loadWeeks(r: ClubRow): Promise<ClubWeek[]> {
     status: string;
     champion: string | null;
     players: number;
+    played: number;
+    total: number;
   }>(
     `SELECT t.id, t.name, t.club_week, t.club_group, t.status,
             (SELECT p.nickname FROM friend_team_members m JOIN player_profiles p ON p.id = m.player_id
               WHERE m.team_id = t.champion_team_id LIMIT 1) AS champion,
-            (SELECT count(*)::int FROM friend_team_members m WHERE m.tournament_id = t.id) AS players
+            (SELECT count(*)::int FROM friend_team_members m WHERE m.tournament_id = t.id) AS players,
+            (SELECT count(*)::int FROM friend_games g WHERE g.tournament_id = t.id AND NOT g.is_bye
+                AND g.status = 'completed') AS played,
+            (SELECT count(*)::int FROM friend_games g WHERE g.tournament_id = t.id AND NOT g.is_bye
+                AND g.status <> 'cancelled') AS total
        FROM friend_tournaments t
       WHERE t.club_id = $1
       ORDER BY t.club_week DESC, t.club_group`,
@@ -325,6 +340,8 @@ async function loadWeeks(r: ClubRow): Promise<ClubWeek[]> {
       status: x.status,
       champion: x.champion,
       players: x.players,
+      played: x.played,
+      total: x.total,
     });
     weeks.set(x.club_week, list);
   }
@@ -349,14 +366,19 @@ async function proposal(r: ClubRow, members: ClubMemberView[], last: ClubWeek | 
   );
 }
 
+/**
+ * The club with everything its pages need. Once every league of the latest
+ * week is finished, the groups are re-made automatically (bottom players
+ * down, top players up) — exactly once per week, whoever looks first.
+ */
 export async function getClubView(clubId: string): Promise<ClubView> {
-  const r = await clubRow(clubId);
-  const [members, weeks] = await Promise.all([loadMembers(clubId), loadWeeks(r)]);
+  await autoRegroup(clubId);
+  return buildView(await clubRow(clubId));
+}
+
+async function buildView(r: ClubRow): Promise<ClubView> {
+  const [members, weeks] = await Promise.all([loadMembers(r.id), loadWeeks(r)]);
   const last = weeks[0];
-  const lastHadResults = !!last?.tournaments.some((t) => t.status === "completed");
-  const movesPending = !!last && last.done && lastHadResults && r.moves_applied_week < last.week;
-  const moves = movesPending ? await proposal(r, members, last) : [];
-  const nick = new Map(members.map((m) => [m.id, m.nickname]));
   return {
     id: r.id,
     slug: r.slug,
@@ -372,9 +394,49 @@ export async function getClubView(clubId: string): Promise<ClubView> {
     weeks,
     nextWeek: (last?.week ?? 0) + 1,
     running: !!last && !last.done,
-    movesPending,
-    proposedMoves: moves.map((m) => ({ ...m, nickname: nick.get(m.playerId) ?? "Player" })),
+    lastMoves: r.last_moves && last && r.last_moves.week === last.week ? r.last_moves : null,
   };
+}
+
+/** apply the finished week's moves if that hasn't happened yet; true if it did */
+export async function autoRegroup(clubId: string): Promise<boolean> {
+  const r = await clubRow(clubId);
+  const weeks = await loadWeeks(r);
+  const last = weeks[0];
+  if (!last || !last.done || r.moves_applied_week >= last.week) return false;
+  if (!last.tournaments.some((t) => t.status === "completed")) return false; // whole week cancelled
+  const members = await loadMembers(clubId);
+  const moves = await proposal(r, members, last);
+  const nick = new Map(members.map((m) => [m.id, m.nickname]));
+  return transaction(async (c) => {
+    const locked = (await c.query<ClubRow>(`SELECT * FROM clubs WHERE id = $1 FOR UPDATE`, [clubId])).rows[0];
+    if (locked.moves_applied_week >= last.week) return false; // someone else just did it
+    for (const m of moves)
+      await c.query(
+        `UPDATE club_members SET group_no = $3 WHERE club_id = $1 AND player_id = $2 AND group_no = $4`,
+        [clubId, m.playerId, m.to, m.from],
+      );
+    const record: LastMoves = {
+      week: last.week,
+      moves: moves.map((m) => ({ ...m, nickname: nick.get(m.playerId) ?? "Player" })),
+    };
+    await c.query(`UPDATE clubs SET moves_applied_week = $2, last_moves = $3 WHERE id = $1`, [
+      clubId,
+      last.week,
+      JSON.stringify(record),
+    ]);
+    return true;
+  });
+}
+
+/** after a result: if it finished a club week, regroup now */
+export async function regroupAfterGame(gameId: string): Promise<void> {
+  const r = await queryOne<{ club_id: string }>(
+    `SELECT t.club_id FROM friend_games g JOIN friend_tournaments t ON t.id = g.tournament_id
+      WHERE g.id = $1 AND t.club_id IS NOT NULL`,
+    [gameId],
+  );
+  if (r) await autoRegroup(r.club_id).catch((e) => console.error("[club] regroup failed", e));
 }
 
 /** clubs a player belongs to (for their profile / dashboard) */
@@ -457,23 +519,47 @@ export async function updateClubSettings(
   });
 }
 
-/** apply last week's moves (or keep everyone where they are with `keep`) */
-export async function applyMoves(clubId: string, keep = false): Promise<number> {
-  const view = await getClubView(clubId);
-  if (!view.movesPending) throw new ClubError(409, "There are no group moves waiting.");
-  const week = view.weeks[0].week;
+/** put everyone the system moved after the last week back where they were */
+export async function undoLastMoves(clubId: string): Promise<number> {
   return transaction(async (c) => {
     const r = (await c.query<ClubRow>(`SELECT * FROM clubs WHERE id = $1 FOR UPDATE`, [clubId])).rows[0];
-    if (r.moves_applied_week >= week) throw new ClubError(409, "Those moves were already applied.");
-    const moves = keep ? [] : view.proposedMoves;
-    for (const m of moves)
-      await c.query(`UPDATE club_members SET group_no = $3 WHERE club_id = $1 AND player_id = $2`, [
-        clubId,
-        m.playerId,
-        m.to,
-      ]);
-    await c.query(`UPDATE clubs SET moves_applied_week = $2 WHERE id = $1`, [clubId, week]);
-    return moves.length;
+    if (!r) throw new ClubError(404, "Club not found");
+    const lm = r.last_moves;
+    if (!lm || lm.undone || !lm.moves.length) throw new ClubError(409, "There are no automatic moves to undo.");
+    const started = await c.query(`SELECT 1 FROM friend_tournaments WHERE club_id = $1 AND club_week > $2`, [
+      clubId,
+      lm.week,
+    ]);
+    if (started.rowCount) throw new ClubError(409, "The next week has already started.");
+    let n = 0;
+    for (const m of lm.moves) {
+      // only players still where the system put them
+      const res = await c.query(
+        `UPDATE club_members SET group_no = $3 WHERE club_id = $1 AND player_id = $2 AND group_no = $4`,
+        [clubId, m.playerId, m.from, m.to],
+      );
+      n += res.rowCount ?? 0;
+    }
+    await c.query(`UPDATE clubs SET last_moves = $2 WHERE id = $1`, [clubId, JSON.stringify({ ...lm, undone: true })]);
+    return n;
+  });
+}
+
+/** swap two players between their groups */
+export async function swapMembers(clubId: string, a: string, b: string): Promise<void> {
+  if (!a || !b || a === b) throw new ClubError(400, "Choose two different players.");
+  await transaction(async (c) => {
+    const rows = (
+      await c.query<{ player_id: string; group_no: number }>(
+        `SELECT player_id, group_no FROM club_members WHERE club_id = $1 AND player_id = ANY($2) FOR UPDATE`,
+        [clubId, [a, b]],
+      )
+    ).rows;
+    if (rows.length !== 2) throw new ClubError(404, "Both players must be in the club.");
+    const [x, y] = rows;
+    if (x.group_no === y.group_no) throw new ClubError(400, "They're already in the same group.");
+    await c.query(`UPDATE club_members SET group_no = $3 WHERE club_id = $1 AND player_id = $2`, [clubId, x.player_id, y.group_no]);
+    await c.query(`UPDATE club_members SET group_no = $3 WHERE club_id = $1 AND player_id = $2`, [clubId, y.player_id, x.group_no]);
   });
 }
 
@@ -481,8 +567,6 @@ export async function applyMoves(clubId: string, keep = false): Promise<number> 
 export async function startWeek(clubId: string): Promise<string[]> {
   const view = await getClubView(clubId);
   if (view.running) throw new ClubError(409, `Week ${view.nextWeek - 1} is still being played.`);
-  if (view.movesPending)
-    throw new ClubError(409, `Apply the group moves from week ${view.nextWeek - 1} first (or keep the groups as they are).`);
   const r = await clubRow(clubId);
   return createClubLeagues({
     clubId,

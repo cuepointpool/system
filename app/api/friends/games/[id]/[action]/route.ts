@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import * as F from "@/lib/friends/store";
 import { FriendsError } from "@/lib/friends/store";
 import { json, readBody, str, withActor } from "@/lib/friends/http";
+import { regroupAfterGame } from "@/lib/clubs/store";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,8 @@ export async function POST(
       default:
         throw new FriendsError(404, "Unknown action");
     }
+    // the last result of a club week regroups the club straight away
+    if (action === "settle" || action === "confirm") await regroupAfterGame(id);
     return json({ ok: true });
   });
 }
